@@ -167,7 +167,7 @@ RESEND_API_KEY=re_...
 1. **Unit test each source** — run `python -m sources.arxiv_source` with a test topic, verify paper dicts returned
 2. **Test LLM analysis** — `python run.py --dry-run` with 1-2 papers, inspect Chinese analysis output
 3. **Test PDF generation** — verify `output/academic_report_{date}.pdf` opens correctly with Chinese text
-4. **Test email** — run full pipeline, check `you@example.com` inbox
+4. **Test email** — run full pipeline, check the configured recipient inbox
 5. **Docker test** — `docker-compose up`, verify cron fires and report arrives
 6. **Failure test** — disable one source in config, verify the rest still work
 

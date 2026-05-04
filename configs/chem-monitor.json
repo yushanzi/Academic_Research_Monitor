@@ -27,7 +27,7 @@
     "base_url": "https://api.poe.com/v1"
   },
   "email": {
-    "recipient": "you@example.com",
+    "recipient": "chem@example.com",
     "from": "Academic Monitor <onboarding@resend.dev>"
   },
   "output_dir": "output/chem-monitor",
