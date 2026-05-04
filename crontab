@@ -1,0 +1,4 @@
+# Run academic research monitor daily at 8:00 AM UTC
+# Source environment variables so API keys are available to cron jobs
+0 8 * * * . /etc/environment; cd /app && /usr/local/bin/python run.py >> /var/log/cron.log 2>&1
+# Empty line required by cron

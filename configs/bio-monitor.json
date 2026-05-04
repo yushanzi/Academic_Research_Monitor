@@ -1,0 +1,38 @@
+{
+  "user": {
+    "name": "bio-monitor"
+  },
+  "schedule": {
+    "cron": "0 */12 * * *",
+    "timezone": "UTC",
+    "run_on_start": false
+  },
+  "sources": {
+    "arxiv": {"enabled": true},
+    "biorxiv": {"enabled": true},
+    "nature": {"enabled": true, "journals": ["nature"]},
+    "science": {"enabled": true},
+    "acs": {"enabled": false}
+  },
+  "interest_description": "持续关注 protein language model、protein structure prediction、AI for drug discovery、structure-based design 等方向，优先关注方法创新和真实实验验证。",
+  "topics": [
+    "protein language model",
+    "protein structure prediction",
+    "AI for drug discovery"
+  ],
+  "time_range_hours": 12,
+  "llm": {
+    "provider": "openai_compatible",
+    "model": "gpt-4o",
+    "base_url":"https://api.poe.com/v1" 
+  },
+  "email": {
+    "recipient": "bio@example.com",
+    "from": "Academic Monitor <onboarding@resend.dev>"
+  },
+  "output_dir": "output/bio-monitor",
+  "access": {
+    "mode": "open_access",
+    "auth_profile": null
+  }
+}

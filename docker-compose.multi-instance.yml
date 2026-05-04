@@ -1,0 +1,26 @@
+services:
+  bio-monitor:
+    image: ${NEWS_MONITOR_IMAGE:-news-monitor:latest}
+    build: .
+    container_name: academic-monitor-bio
+    env_file:
+      - .env
+    environment:
+      CONFIG_PATH: /app/config.json
+    volumes:
+      - ./output:/app/output
+      - ./configs/bio-monitor.json:/app/config.json:ro
+    restart: unless-stopped
+
+  chem-monitor:
+    image: ${NEWS_MONITOR_IMAGE:-news-monitor:latest}
+    build: .
+    container_name: academic-monitor-chem
+    env_file:
+      - .env
+    environment:
+      CONFIG_PATH: /app/config.json
+    volumes:
+      - ./output:/app/output
+      - ./configs/chem-monitor.json:/app/config.json:ro
+    restart: unless-stopped
