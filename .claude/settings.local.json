@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip:*)",
+      "Bash(python3:*)",
+      "Bash(npm --version)",
+      "Bash(npm list:*)",
+      "Bash(npm search:*)",
+      "Bash(pip3 list:*)",
+      "WebSearch",
+      "Bash(find . -name *.md -newermt 2025-03-29 -o -name *.md -newermt 2026-03-29)"
+    ]
+  }
+}
