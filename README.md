@@ -130,6 +130,47 @@ Each container mounts its own config to `/app/config.json` and writes to its own
 
 For production add/change workflows, see `OPERATIONS.md`.
 
+## Windows one-shot runtime
+
+For Windows, the recommended deployment model is:
+
+- Docker Desktop may stay running
+- the image stays built locally
+- **containers do not stay running**
+- Windows Task Scheduler starts a fresh container for each scheduled run
+- the container runs once and exits
+
+Use the bundled PowerShell wrapper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath configs\bio-monitor.json
+```
+
+This wrapper:
+
+- reads the target config file
+- ensures the configured output directory exists
+- checks whether Docker is ready
+- if needed, tries to start Docker Desktop and waits up to 5 minutes
+- launches `docker run --rm`
+- overrides the image entrypoint to run `python /app/run.py --config /app/config.json`
+- removes the container after the run completes
+
+This auto-start behavior is intended for Windows Task Scheduler tasks that run **while the user is logged in**.
+
+Recommended Windows workflow:
+
+1. Build the image once
+2. Run the PowerShell wrapper manually once
+3. Create one Task Scheduler job per config file
+4. Let Task Scheduler trigger one-shot container runs at the desired times
+
+Example image build:
+
+```bash
+docker build -t news-monitor:latest .
+```
+
 ## Output
 
 Generated files are written to `output/<instance>/` by default:

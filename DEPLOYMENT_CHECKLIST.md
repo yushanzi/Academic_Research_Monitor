@@ -11,6 +11,8 @@ Make sure the target machine has:
 - outbound network access to external APIs
 - a writable directory for the `output/` volume mount
 - an editor that will not convert shell scripts to CRLF
+- if using Windows Task Scheduler, permission to run Docker Desktop / Docker CLI from the scheduled account
+- for auto-start behavior, configure the task to run when the user is logged in
 
 ### 1.2 Credentials
 
@@ -49,6 +51,10 @@ Make sure each `configs/<instance>.json` includes at least:
 - `email.recipient`
 - `output_dir`
 - `access.mode = open_access`
+
+Note for Windows one-shot deployment:
+
+- `schedule.cron` and `schedule.run_on_start` remain in the config for compatibility, but the real execution schedule comes from Windows Task Scheduler
 
 ### 1.4 Output layout
 
@@ -113,6 +119,12 @@ Expected checks:
 - `entrypoint.sh` generates cron successfully
 - if `run_on_start=true`, the instance performs one immediate run at startup
 
+For Windows one-shot deployment, build the image once instead:
+
+```bash
+docker build -t news-monitor:latest .
+```
+
 ---
 
 ### Step 4: Check container logs
@@ -136,6 +148,20 @@ Look for logs such as:
 - `Report saved`
 
 If a Windows container cannot read mounted directories, first check Docker Desktop file sharing / path access settings.
+
+For Windows one-shot deployment, manually run one instance first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath configs\bio-monitor.json
+```
+
+Expected checks:
+
+- a fresh container is created
+- Docker Desktop starts automatically if it was not already ready
+- the run completes once
+- the container is removed automatically
+- output files are written successfully
 
 ---
 
@@ -191,11 +217,21 @@ docker logs -f academic-monitor-bio
 
 For the first verification, it is recommended to temporarily set `schedule.run_on_start = true` for the target instance so it runs immediately after container startup.
 
+For Windows one-shot deployment, the preferred equivalent is:
+
+- manually run `scripts/run-monitor.ps1` once for `bio-monitor`
+- after validation, create one Task Scheduler job per config file
+
 ### Step 3: Start both instances after the first one passes
 
 ```bash
 docker compose -f docker-compose.multi-instance.yml up --build -d
 ```
+
+For Windows one-shot deployment, create separate Task Scheduler tasks such as:
+
+- `AcademicResearchMonitor-Bio`
+- `AcademicResearchMonitor-Chem`
 
 ### Step 4: Check container status
 
@@ -297,6 +333,14 @@ docker compose -f docker-compose.multi-instance.yml logs -f
 docker compose -f docker-compose.multi-instance.yml up --build -d
 docker compose -f docker-compose.multi-instance.yml ps
 docker logs -f academic-monitor-chem
+```
+
+Recommended Windows one-shot sequence:
+
+```powershell
+docker build -t news-monitor:latest .
+powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath configs\bio-monitor.json
+# after validation, create one Task Scheduler task per monitor instance
 ```
 
 ---
