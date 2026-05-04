@@ -1,25 +1,27 @@
-# Academic Research Monitor 部署清单
+# Academic Research Monitor Deployment Checklist
 
-## 一、部署前检查
+## 1. Pre-deployment checks
 
-### 1. 环境准备
-确认机器上已有：
+### 1.1 Environment
 
-- Docker Desktop（Windows 推荐启用 WSL2 backend）
+Make sure the target machine has:
+
+- Docker Desktop (WSL2 backend recommended on Windows)
 - Docker Compose
-- 可联网访问外部 API
-- 可写目录用于挂载 `output/`
-- 编辑器不会把 shell 脚本改成 CRLF
+- outbound network access to external APIs
+- a writable directory for the `output/` volume mount
+- an editor that will not convert shell scripts to CRLF
 
-### 2. 凭据准备
-准备好 `.env` 文件，至少包含：
+### 1.2 Credentials
+
+Prepare a `.env` file with at least:
 
 ```bash
 RESEND_API_KEY=...
 ANTHROPIC_API_KEY=...
 ```
 
-或：
+or:
 
 ```bash
 RESEND_API_KEY=...
@@ -27,28 +29,30 @@ OPENAI_API_KEY=...
 OPENAI_BASE_URL=...
 ```
 
-可选：
+Optional:
 
 ```bash
 NEWS_MONITOR_IMAGE=news-monitor:latest
 ```
 
-### 3. 配置文件检查
-确认 `configs/<instance>.json` 至少正确填写：
+### 1.3 Config validation
+
+Make sure each `configs/<instance>.json` includes at least:
 
 - `user.name`
 - `schedule.cron`
-- `schedule.timezone` = `UTC`
+- `schedule.timezone = UTC`
 - `schedule.run_on_start`
-- `topics` 或 `interest_description`
+- `topics` or `interest_description`
 - `llm.provider`
 - `llm.model`
 - `email.recipient`
 - `output_dir`
-- `access.mode` = `open_access`
+- `access.mode = open_access`
 
-### 4. 输出目录规划
-建议先确认目录结构：
+### 1.4 Output layout
+
+Plan the output directories in advance, for example:
 
 ```text
 output/
@@ -56,87 +60,94 @@ output/
   chem-monitor/
 ```
 
-每个实例一个独立目录。
+Each instance should write to its own directory.
 
 ---
 
-## 二、首次多实例/实例化部署建议顺序
+## 2. First deployment sequence
 
-### Step 1：先跑本地测试
-在项目目录执行：
+### Step 1: Run tests locally
+
+From the project directory:
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m unittest discover -s tests -v
 ```
 
-预期：
-- 全部测试通过
+Expected result:
+
+- all tests pass
 
 ---
 
-### Step 2：本地 dry-run
-先不要发邮件，先看链路是否打通：
+### Step 2: Run a local dry-run
+
+Before sending real emails, validate the full pipeline:
 
 ```bash
 python3 run.py --config configs/bio-monitor.json --dry-run
 ```
 
-预期检查：
+Expected checks:
 
-- 没有配置报错
-- 能正常抓取/分析/生成报告
-- 生成文件：
+- no config validation errors
+- papers can be fetched and analyzed
+- reports are generated successfully
+- generated files include:
   - `output/<instance>/interest_profile.json`
   - `output/<instance>/academic_report_YYYY-MM-DD.html`
   - `output/<instance>/academic_report_YYYY-MM-DD.pdf`
 
 ---
 
-### Step 3：Docker 构建并启动
+### Step 3: Build and start with Docker
+
 ```bash
 docker compose -f docker-compose.multi-instance.yml up --build -d
 ```
 
-预期检查：
+Expected checks:
 
-- 容器成功启动
-- 没有因为配置错误退出
-- `entrypoint.sh` 正常生成 cron
-- 如果 `run_on_start=true`，启动后会先执行一次
+- containers start successfully
+- containers do not exit immediately because of config errors
+- `entrypoint.sh` generates cron successfully
+- if `run_on_start=true`, the instance performs one immediate run at startup
 
 ---
 
-### Step 4：查看容器日志
+### Step 4: Check container logs
+
 ```bash
 docker logs -f <container_name>
 ```
 
-可先用：
+Or:
 
 ```bash
 docker compose -f docker-compose.multi-instance.yml logs -f
 ```
 
-重点检查日志里是否有：
+Look for logs such as:
 
-- Starting academic research monitor
-- Using query topics
-- Found X papers
-- Total relevant papers
-- Report saved
+- `Starting academic research monitor`
+- `Using query topics`
+- `Found X papers`
+- `Total relevant papers`
+- `Report saved`
 
-Windows 上如果容器无法读取挂载目录，优先检查 Docker Desktop 的文件共享/路径访问权限。
+If a Windows container cannot read mounted directories, first check Docker Desktop file sharing / path access settings.
 
 ---
 
-### Step 5：验证输出文件
-检查实例输出目录，例如：
+### Step 5: Verify output files
+
+For example:
 
 ```bash
 ls -la output/bio-monitor
 ```
 
-确认有：
+Confirm that the directory contains:
 
 - `interest_profile.json`
 - `.html`
@@ -144,116 +155,130 @@ ls -la output/bio-monitor
 
 ---
 
-### Step 6：验证邮件发送
-把 `--dry-run` 去掉后真实运行，确认：
+### Step 6: Verify email delivery
 
-- 收件箱收到邮件
-- 发件人正确
-- 附件 PDF 可打开
-- 报告字段完整
+Run without `--dry-run` and confirm:
+
+- the report email arrives
+- the sender is correct
+- the PDF attachment opens
+- report fields are complete
 
 ---
 
-## 三、多实例扩容建议顺序
+## 3. Multi-instance rollout sequence
 
-### Step 1：准备实例配置
-例如：
+### Step 1: Prepare instance configs
+
+For example:
 
 - `configs/bio-monitor.json`
 - `configs/chem-monitor.json`
 
-确认每个实例：
-- `user.name` 唯一
-- `output_dir` 唯一
-- 收件人正确
-- cron 合理
+Confirm for each instance:
 
-### Step 2：先启动一个实例做首次验证
+- `user.name` is unique
+- `output_dir` is unique
+- recipient email is correct
+- cron schedule is reasonable
+
+### Step 2: Start one instance first
+
 ```bash
 docker compose -f docker-compose.multi-instance.yml up --build -d bio-monitor
 docker logs -f academic-monitor-bio
 ```
 
-建议首次验证时把目标实例的 `schedule.run_on_start` 临时改为 `true`，这样容器启动后会立刻跑一次。
+For the first verification, it is recommended to temporarily set `schedule.run_on_start = true` for the target instance so it runs immediately after container startup.
 
-### Step 3：确认单实例验证通过后，再启动多实例
+### Step 3: Start both instances after the first one passes
+
 ```bash
 docker compose -f docker-compose.multi-instance.yml up --build -d
 ```
 
-### Step 4：检查容器状态
+### Step 4: Check container status
+
 ```bash
 docker compose -f docker-compose.multi-instance.yml ps
 ```
 
-预期：
-- 每个实例都处于运行中
+Expected result:
 
-### Step 5：分别看日志
+- all instances are running
+
+### Step 5: Check logs per instance
+
 ```bash
 docker logs -f academic-monitor-bio
 docker logs -f academic-monitor-chem
 ```
 
-### Step 6：检查输出隔离
-确认：
-- `output/bio-monitor/` 只属于 bio 实例
-- `output/chem-monitor/` 只属于 chem 实例
+### Step 6: Verify output isolation
+
+Confirm:
+
+- `output/bio-monitor/` is used only by the bio instance
+- `output/chem-monitor/` is used only by the chem instance
 
 ---
 
-## 四、首次上线建议配置
+## 4. Recommended first-live settings
 
-为了第一次验证更顺利，建议：
+For a smoother first validation:
 
-- `schedule.run_on_start = true`
-- 先只启一个实例
-- topic 不要设得太宽
-- `time_range_hours` 先设 12 或 24
-- 先验证邮件和 PDF 内容，再开多实例
+- set `schedule.run_on_start = true`
+- start with one instance only
+- avoid overly broad topics at first
+- set `time_range_hours` to 12 or 24 initially
+- verify email delivery and PDF quality before enabling all instances
 
-第一次成功后，如果你只想靠 cron 调度：
+After the first successful run, if you want cron-only scheduling:
 
-- 把 `schedule.run_on_start` 改回 `false`
-- 重启容器
+- change `schedule.run_on_start` back to `false`
+- restart the container
 
 ---
 
-## 五、常见失败排查
+## 5. Common failure checks
 
-### 1. 容器启动即退出
-优先检查：
+### 5.1 Container exits immediately
 
-- 配置文件路径是否挂载正确
-- `schedule.timezone` 是否不是 `UTC`
-- `schedule.cron` 是否非法
-- `email.recipient` 是否为空
-- `output_dir` 是否可写
+Check:
 
-### 2. 没有生成报告
-检查：
+- config file path is mounted correctly
+- `schedule.timezone` is `UTC`
+- `schedule.cron` is valid
+- `email.recipient` is not empty
+- `output_dir` is writable
 
-- 是否没有候选论文
-- 是否 relevance 阶段全部被过滤
-- 外部 API 是否失败
-- LLM key 是否有效
+### 5.2 No report is generated
 
-### 3. 收不到邮件
-检查：
+Check:
+
+- there are candidate papers to process
+- all candidates were not filtered out at the relevance stage
+- external APIs are reachable
+- the LLM key is valid
+
+### 5.3 Email is not delivered
+
+Check:
 
 - `RESEND_API_KEY`
-- 收件地址
+- recipient email address
 - `email.from`
-- Resend 发信域/沙箱限制
+- Resend sending-domain or sandbox restrictions
 
-### 4. 一直提示已有运行任务
-检查输出目录里是否有残留：
+### 5.4 Run lock appears to be stuck
+
+Check whether the output directory still contains:
 
 ```bash
 ls output/<instance>/.run.lock
 ```
 
-如果确认没有活跃进程，可删除：
+If there is no active process using it, remove it:
 
 ```bash
 rm output/<instance>/.run.lock
@@ -261,14 +286,13 @@ rm output/<instance>/.run.lock
 
 ---
 
-## 六、推荐首次执行命令顺序
+## 6. Recommended command sequence
 
-### 多实例
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m unittest discover -s tests -v
 python3 run.py --config configs/bio-monitor.json --dry-run
-docker logs -f academic-monitor-bio
 docker compose -f docker-compose.multi-instance.yml up --build -d bio-monitor
+docker logs -f academic-monitor-bio
 docker compose -f docker-compose.multi-instance.yml logs -f
 docker compose -f docker-compose.multi-instance.yml up --build -d
 docker compose -f docker-compose.multi-instance.yml ps
@@ -277,14 +301,14 @@ docker logs -f academic-monitor-chem
 
 ---
 
-## 七、部署验收标准
+## 7. Deployment acceptance criteria
 
-首次部署成功，至少满足：
+A successful first deployment should satisfy at least:
 
-- 配置能正常加载
-- 容器能正常启动
-- 能生成 `interest_profile.json`
-- 能生成 HTML/PDF 报告
-- 邮件能正常送达
-- 多实例输出互不污染
-- 不出现明显重入/锁死问题
+- config loads successfully
+- containers start successfully
+- `interest_profile.json` is generated
+- HTML and PDF reports are generated
+- email delivery works
+- multi-instance outputs do not interfere with each other
+- no obvious lock or overlapping-run issues occur

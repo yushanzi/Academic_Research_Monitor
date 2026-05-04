@@ -7,3 +7,10 @@ venv/
 .venv/
 .DS_Store
 .claude/
+
+# Working-history / ad hoc analysis docs
+PLAN.md
+DEVELOPMENT_PLAN.md
+MAC_TEST_SUMMARY_*.md
+automation_strategy_summary_*.md
+code_review_*.md
