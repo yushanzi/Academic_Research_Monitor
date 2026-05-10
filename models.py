@@ -16,18 +16,6 @@ class InterestProfile:
     def to_dict(self) -> dict:
         return asdict(self)
 
-
-@dataclass
-class RelevanceResult:
-    is_relevant: bool
-    relevance_score: float
-    matched_aspects: list[str]
-    reason: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
 @dataclass
 class AccessInfo:
     landing_page_url: str = ""
@@ -63,7 +51,7 @@ class Paper:
     evidence_level: str = "abstract_only"
     matched_topics: list[str] = field(default_factory=list)
     analysis: dict[str, Any] = field(default_factory=dict)
-    relevance: RelevanceResult | dict[str, Any] | None = None
+    relevance: Any | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

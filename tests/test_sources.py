@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+from sources.acs_source import ACS_FEEDS, ACSSource
 from sources.arxiv_source import ArxivSource, USER_AGENT as ARXIV_USER_AGENT
 from sources.biorxiv_source import BIORXIV_API, BiorxivSource, USER_AGENT as BIORXIV_USER_AGENT
 
@@ -65,3 +66,14 @@ class SourceTests(unittest.TestCase):
             mock_get.call_args.kwargs["headers"]["User-Agent"],
             BIORXIV_USER_AGENT,
         )
+
+    def test_acs_source_includes_jctc_feed_and_defaults(self):
+        self.assertIn("jctcce", ACS_FEEDS)
+        self.assertEqual(
+            ACS_FEEDS["jctcce"]["name"],
+            "Journal of Chemical Theory and Computation",
+        )
+        self.assertIn("jc=jctcce", ACS_FEEDS["jctcce"]["url"])
+
+        source = ACSSource()
+        self.assertIn("jctcce", source.journals)

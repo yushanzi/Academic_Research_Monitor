@@ -20,5 +20,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN mkdir -p output logs && chmod +x /app/entrypoint.sh
 
-ENV CONFIG_PATH=/app/config.json
+ENV CONFIG_PATH=/app/instance/config.json
 ENTRYPOINT ["/app/entrypoint.sh"]

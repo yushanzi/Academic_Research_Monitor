@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .base import DocumentAccessProvider
+from .pdf_extract import extract_text_from_pdf_bytes
 from models import AccessInfo, Paper
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ GENERIC_FULL_TEXT_SELECTORS = (
 SOURCE_RULES = {
     "arxiv": {
         "pdf_patterns": ("/pdf/", ".pdf"),
-        "full_text_selectors": ("blockquote.abstract", "article", "main"),
+        "full_text_selectors": ("article", "main"),
         "abstract_selectors": ("blockquote.abstract",),
         "meta_names": ("citation_abstract", "description", "dc.description"),
         "min_length": 1200,
@@ -126,6 +127,15 @@ class OpenAccessDocumentAccessProvider(DocumentAccessProvider):
                 effective_access_mode = "open_access"
                 open_access = True
 
+        if not full_text_available and download_url:
+            extracted_text = _extract_full_text_from_pdf(download_url, paper, rules)
+            if extracted_text:
+                full_text = extracted_text
+                full_text_available = True
+                evidence_level = "full_text"
+                effective_access_mode = "open_access"
+                open_access = True
+
         if not entry_url:
             entry_url = doi_url
         if download_url:
@@ -175,9 +185,30 @@ def _safe_get(url: str):
         return None
 
 
+def _extract_full_text_from_pdf(download_url: str, paper: Paper, rules: dict) -> str:
+    response = _safe_get(download_url)
+    if not response:
+        return ""
+    if not _is_pdf_response(response, download_url):
+        logger.debug("Skipping non-PDF download URL for full-text extraction: %s", download_url)
+        return ""
+
+    extracted_text = extract_text_from_pdf_bytes(getattr(response, "content", b"") or b"")
+    if _meets_text_threshold(extracted_text, paper, rules):
+        return extracted_text[:20000]
+    return ""
+
+
 def _is_html(response) -> bool:
     content_type = (response.headers.get("content-type") or "").lower()
     return "html" in content_type or "xml" in content_type or not content_type
+
+
+def _is_pdf_response(response, url: str) -> bool:
+    content_type = (response.headers.get("content-type") or "").lower()
+    final_url = str(getattr(response, "url", "") or url).lower()
+    requested_url = str(url or "").lower()
+    return "pdf" in content_type or final_url.endswith(".pdf") or requested_url.endswith(".pdf")
 
 
 def _parse_landing_page(
@@ -249,20 +280,16 @@ def _extract_full_text_from_html(soup: BeautifulSoup, paper: Paper, rules: dict,
         seen.add(selector)
         container = soup.select_one(selector)
         if container:
+            if _looks_like_abstract_container(container):
+                continue
             text = _normalize_text("\n".join(p.get_text(" ", strip=True) for p in container.find_all("p")))
             if _meets_text_threshold(text, paper, rules):
                 return text[:20000]
 
-    abstract_text = _extract_abstract_like_text(soup, rules)
-    if _meets_text_threshold(abstract_text, paper, rules, allow_short=True):
-        return abstract_text[:20000]
-
-    paragraphs = _normalize_text("\n".join(p.get_text(" ", strip=True) for p in soup.find_all("p")))
+    paragraphs = _normalize_text("\n".join(_non_abstract_paragraphs(soup)))
     if _meets_text_threshold(paragraphs, paper, rules):
         return paragraphs[:20000]
 
-    if source_key in {"arxiv", "biorxiv"} and abstract_text:
-        return abstract_text[:20000]
     return ""
 
 
@@ -313,6 +340,30 @@ def _meets_text_threshold(text: str, paper: Paper, rules: dict, *, allow_short: 
     if allow_short and source in {"arxiv", "biorxiv"}:
         min_length = short_length
     return len(text) >= min_length
+
+
+def _looks_like_abstract_container(container) -> bool:
+    attrs = []
+    if container.get("id"):
+        attrs.append(container.get("id"))
+    attrs.extend(container.get("class") or [])
+    if container.get("data-title"):
+        attrs.append(container.get("data-title"))
+    label = " ".join(str(value).lower() for value in attrs if value)
+    if "abstract" in label:
+        return True
+    return container.name == "blockquote" and "abstract" in label
+
+
+def _non_abstract_paragraphs(soup: BeautifulSoup) -> list[str]:
+    paragraphs: list[str] = []
+    for paragraph in soup.find_all("p"):
+        if any(_looks_like_abstract_container(parent) for parent in paragraph.parents if getattr(parent, "name", None)):
+            continue
+        text = paragraph.get_text(" ", strip=True)
+        if text:
+            paragraphs.append(text)
+    return paragraphs
 
 
 def _normalize_text(text: str) -> str:

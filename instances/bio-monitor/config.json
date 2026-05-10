@@ -1,0 +1,107 @@
+{
+  "user": {
+    "name": "bio-monitor"
+  },
+  "schedule": {
+    "cron": "0 8 * * *",
+    "timezone": "Asia/Hong_Kong",
+    "run_on_start": true
+  },
+  "sources": {
+    "arxiv": {
+      "enabled": true
+    },
+    "biorxiv": {
+      "enabled": true
+    },
+    "nature": {
+      "enabled": true,
+      "journals": [
+        "nature"
+      ]
+    },
+    "science": {
+      "enabled": true
+    },
+    "acs": {
+      "enabled": false,
+      "journals": [
+        "jmcmar",
+        "jacsat",
+        "jctcce"
+      ]
+    }
+  },
+  "time_range_hours": 24,
+  "llm": {
+    "provider": "openai_compatible",
+    "model": "gemini-3-flash",
+    "base_url": "https://api.poe.com/v1"
+  },
+  "email": {
+    "recipient": "you@example.com",
+    "send_empty_notification": true,
+    "from": "Academic Monitor <noreply@innoscreen.ai>"
+  },
+  "output_dir": "output/bio-monitor",
+  "access": {
+    "mode": "open_access",
+    "auth_profile": null
+  },
+  "interest_profile_query": {
+    "expand_synonyms": true,
+    "max_query_synonyms": 3
+  },
+  "content_analysis": {
+    "llm": null
+  },
+  "abstract_selection": {
+    "method": "candidate_score",
+    "three_llm_voting": {
+      "required_votes": 2,
+      "fallback_method": "candidate_score",
+      "judges": [
+        {
+          "name": "judge_1",
+          "provider": "openai_compatible",
+          "model": "gemini-3-flash",
+          "base_url": "https://api.poe.com/v1"
+        },
+        {
+          "name": "judge_2",
+          "provider": "openai_compatible",
+          "model": "gpt-4o",
+          "base_url": "https://api.poe.com/v1"
+        },
+        {
+          "name": "judge_3",
+          "provider": "openai_compatible",
+          "model": "claude-haiku-4.5",
+          "base_url": "https://api.poe.com/v1"
+        }
+      ]
+    }
+  },
+  "candidate_scoring": {
+    "threshold": 0.6,
+    "fail_open": false,
+    "exclude_penalty_weight": 0.3,
+    "weights": {
+      "topic_match": 0.4,
+      "must_have_match": 0.2,
+      "evidence_strength": 0.25,
+      "focus_specificity": 0.15
+    }
+  },
+  "relevance_scoring": {
+    "threshold": 0.65,
+    "exclude_penalty_weight": 0.3,
+    "weights": {
+      "topic_match": 0.35,
+      "must_have_match": 0.2,
+      "evidence_quality": 0.2,
+      "content_alignment": 0.15,
+      "actionability": 0.1
+    }
+  }
+}

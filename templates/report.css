@@ -33,6 +33,8 @@ h2 {
   border-left: 4px solid #16213e;
   padding-left: 0.5em;
   margin-top: 1.5em;
+  page-break-after: avoid;
+  break-after: avoid-page;
 }
 
 h3 {
@@ -68,12 +70,22 @@ h4 {
 
 /* Paper cards */
 .paper {
-  margin: 1em 0;
-  page-break-inside: avoid;
+  margin: 0;
 }
 
 .paper h3 {
-  margin-bottom: 0.3em;
+  margin: 0 0 0.3em 0;
+  page-break-after: avoid;
+  break-after: avoid-page;
+}
+
+.papers h2 {
+  margin-bottom: 3.2em;
+}
+
+.paper .meta {
+  page-break-inside: avoid;
+  break-inside: avoid-page;
 }
 
 .topic-group {
@@ -102,6 +114,8 @@ h4 {
   background: #fafafa;
   padding: 0.6em 0.8em;
   border-radius: 4px;
+  page-break-inside: avoid;
+  break-inside: avoid-page;
 }
 
 .analysis ul {
@@ -116,7 +130,7 @@ h4 {
 hr {
   border: none;
   border-top: 1px solid #ddd;
-  margin: 1.2em 0;
+  margin: 1.6em 0;
 }
 
 .empty {

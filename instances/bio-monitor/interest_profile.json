@@ -1,0 +1,25 @@
+{
+  "confirmed": true,
+  "source": "generated_from_document",
+  "fingerprint": "25147afa6802d41b2c67d36314a19efb9c9e6c179014cb8ac1535c8f970330b3",
+  "versions": {
+    "prompt_version": "interest-profile-v4",
+    "schema_version": "interest-profile-schema-v3",
+    "parser_version": "interest-profile-parser-v1"
+  },
+  "profile": {
+    "core_topics": [
+      "protein language model",
+      "protein structure prediction",
+      "AI for drug discovery",
+      "structure-based design"
+    ],
+    "synonyms": [],
+    "must_have": [
+      
+    ],
+    "nice_to_have": [],
+    "exclude": [],
+    "summary": "Track protein language models, protein structure prediction, AI for drug discovery, and structure-based design."
+  }
+}

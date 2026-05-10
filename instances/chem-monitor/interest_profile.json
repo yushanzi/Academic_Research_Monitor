@@ -1,0 +1,24 @@
+{
+  "confirmed": true,
+  "source": "generated_from_document",
+  "fingerprint": "214bce01531727ed16b8bd9c7c2d44ba92fdccc9b822255c0ccdafb74d04f60d",
+  "versions": {
+    "prompt_version": "interest-profile-v4",
+    "schema_version": "interest-profile-schema-v3",
+    "parser_version": "interest-profile-parser-v1"
+  },
+  "profile": {
+    "core_topics": [
+      "small molecule design",
+      "hit-to-lead optimization",
+      "structure-based drug design",
+      "AI for drug discovery",
+      "PARP1 inhibitor"
+    ],
+    "synonyms": [],
+    "must_have": [],
+    "nice_to_have": [],
+    "exclude": [],
+    "summary": "Track small-molecule design, hit-to-lead optimization, structure-based drug design, AI for drug discovery, and PARP1 inhibitors, with emphasis on high-quality SAR and mechanism validation."
+  }
+}

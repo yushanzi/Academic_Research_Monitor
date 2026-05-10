@@ -17,75 +17,56 @@
       <tr><td class="label">实例名</td><td>{{ monitor_name }}</td></tr>
       <tr><td class="label">监控主题</td><td>{{ topics | join("、") if topics else "N/A" }}</td></tr>
       <tr><td class="label">兴趣摘要</td><td>{{ profile.summary or "N/A" }}</td></tr>
-      <tr><td class="label">核心关注点</td><td>{{ profile.core_topics | join("、") if profile.core_topics else "N/A" }}</td></tr>
       <tr><td class="label">排除方向</td><td>{{ profile.exclude | join("、") if profile.exclude else "无" }}</td></tr>
-      <tr><td class="label">调度频率</td><td>{{ schedule.cron }} ({{ schedule.timezone or "UTC" }})</td></tr>
+      <tr><td class="label">调度频率</td><td>{{ schedule_display }}</td></tr>
       <tr><td class="label">时间范围</td><td>过去 {{ time_range_hours }} 小时</td></tr>
-      <tr><td class="label">监控来源</td><td>{{ sources_used | join("、") if sources_used else "N/A" }}</td></tr>
-      <tr><td class="label">入选唯一论文数</td><td>{{ papers | length }}</td></tr>
+      <tr><td class="label">本报告文章来</td><td>{{ sources_used | join("、") if sources_used else "N/A" }}</td></tr>
+      <tr><td class="label">入选论文数（入选/抓取）</td><td>{{ run_stats.report_count_display or ((papers | length) ~ "/0") }}</td></tr>
     </table>
   </section>
 
   {% if papers %}
   <section class="papers">
     <h2>2. 论文详细分析</h2>
-
-    {% if papers_by_topic %}
-      {% for topic_group in papers_by_topic %}
-      <section class="topic-group">
-        <h3>{{ loop.index }}. {{ topic_group.topic }}</h3>
-        <p class="topic-count">匹配论文数：{{ topic_group.count }}</p>
-
-        {% if topic_group.papers %}
-          {% for paper in topic_group.papers %}
-          <article class="paper">
-            <h4>{{ paper.title }}</h4>
-            <div class="meta">
-              <p><strong>作者：</strong>{{ paper.authors | join("，") if paper.authors else "N/A" }}</p>
-              <p><strong>发表日期：</strong>{{ paper.date }}</p>
-              <p><strong>来源：</strong>{{ paper.source }}</p>
-              <p><strong>匹配主题：</strong>{{ paper.matched_topics | join("、") if paper.matched_topics else "N/A" }}</p>
-              <p><strong>相关性评分：</strong>{{ "%.2f"|format(paper.relevance.relevance_score if paper.relevance else 0) }}</p>
-              <p><strong>命中关注点：</strong>{{ paper.relevance.matched_aspects | join("、") if paper.relevance and paper.relevance.matched_aspects else "N/A" }}</p>
-              <p><strong>纳入原因：</strong>{{ paper.relevance.reason if paper.relevance else "N/A" }}</p>
-              <p><strong>判断依据：</strong>{{ "全文" if paper.evidence_level == "full_text" else "仅摘要" }}</p>
-              <p><strong>访问方式：</strong>{{ paper.effective_access_mode }}</p>
-              <p><strong>Open Access：</strong>{{ "是" if paper.open_access else "否" }}</p>
-              <p><strong>访问入口：</strong><a href="{{ paper.entry_url }}">{{ paper.entry_url }}</a></p>
-              {% if paper.download_url %}
-              <p><strong>下载地址：</strong><a href="{{ paper.download_url }}">{{ paper.download_url }}</a></p>
-              {% endif %}
-            </div>
-
-            {% if paper.analysis %}
-            <div class="analysis">
-              <p><strong>研究方向：</strong>{{ paper.analysis.research_direction }}</p>
-              {% if paper.analysis.innovation_points %}
-              <p><strong>创新点分析：</strong></p>
-              <ul>
-                {% for point in paper.analysis.innovation_points %}
-                <li>{{ point }}</li>
-                {% endfor %}
-              </ul>
-              {% endif %}
-              <p><strong>摘要总结：</strong>{{ paper.analysis.summary }}</p>
-            </div>
-            {% endif %}
-          </article>
-          {% if not loop.last %}<hr>{% endif %}
-          {% endfor %}
-        {% else %}
-        <p class="empty">该主题今日未发现符合条件的论文。</p>
+    {% for paper in papers %}
+    <article class="paper">
+      <h3>{{ loop.index }}. {{ paper.title }}</h3>
+      <div class="meta">
+        <p><strong>作者：</strong>{{ paper.authors | join("，") if paper.authors else "N/A" }}</p>
+        <p><strong>发表日期：</strong>{{ paper.date }}</p>
+        <p><strong>来源：</strong>{{ paper.source }}</p>
+        <p><strong>匹配主题：</strong>{{ paper.matched_topics | join("、") if paper.matched_topics else "N/A" }}</p>
+        <p><strong>相关性评分：</strong>{{ "%.2f"|format(paper.relevance.relevance_score if paper.relevance else 0) }}</p>
+        <p><strong>纳入原因：</strong>{{ paper.relevance.reason if paper.relevance else "N/A" }}</p>
+        {% if paper.relevance and paper.relevance.vote_summary %}
+        <p><strong>投票摘要：</strong>{{ paper.relevance.vote_summary.relevant_votes }}/{{ paper.relevance.vote_summary.successful_judges }} 通过（规则：{{ paper.relevance.vote_summary.decision_rule }}）</p>
         {% endif %}
-      </section>
-      {% endfor %}
-    {% else %}
-      {% for paper in papers %}
-      <article class="paper">
-        <h3>{{ paper.title }}</h3>
-      </article>
-      {% endfor %}
-    {% endif %}
+        {% if paper.relevance and paper.relevance.warning_messages %}
+        <p><strong>告警：</strong>{{ paper.relevance.warning_messages | join(" | ") }}</p>
+        {% endif %}
+        <p><strong>访问入口：</strong><a href="{{ paper.entry_url }}">{{ paper.entry_url }}</a></p>
+        {% if paper.download_url %}
+        <p><strong>下载地址：</strong><a href="{{ paper.download_url }}">{{ paper.download_url }}</a></p>
+        {% endif %}
+      </div>
+
+      {% if paper.analysis %}
+      <div class="analysis">
+        <p><strong>研究方向：</strong>{{ paper.analysis.research_direction }}</p>
+        {% if paper.analysis.innovation_points %}
+        <p><strong>创新点分析：</strong></p>
+        <ul>
+          {% for point in paper.analysis.innovation_points %}
+          <li>{{ point }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <p><strong>{{ summary_label(paper) }}：</strong>{{ paper.analysis.summary }}</p>
+      </div>
+      {% endif %}
+    </article>
+    {% if not loop.last %}<hr>{% endif %}
+    {% endfor %}
   </section>
   {% else %}
   <section>

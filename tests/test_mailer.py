@@ -41,7 +41,7 @@ class MailerTests(unittest.TestCase):
 
         config = {
             "user": {"name": "monitor-a"},
-            "topics": ["protein folding"],
+            "interest_profile": {"core_topics": ["protein folding"]},
             "email": {"recipient": "user@example.com", "from": "Monitor <sender@example.com>"},
         }
 
@@ -64,7 +64,7 @@ class MailerTests(unittest.TestCase):
     def test_send_empty_notification_skips_without_api_key(self):
         config = {
             "user": {"name": "monitor-a"},
-            "topics": ["protein folding"],
+            "interest_profile": {"core_topics": ["protein folding"]},
             "email": {"recipient": "user@example.com", "from": "Monitor <sender@example.com>"},
         }
 
