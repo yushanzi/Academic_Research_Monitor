@@ -3,18 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
+import re
 from pathlib import Path
 
-from config_schema import AppConfig
 from json_utils import parse_json_object
 from llm.base import LLMProvider
 from models import InterestProfile
+from app_config.loader import resolve_interest_profile_path
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "interest-profile-v1"
-SCHEMA_VERSION = "interest-profile-schema-v1"
+PROMPT_VERSION = "interest-profile-v4"
+SCHEMA_VERSION = "interest-profile-schema-v3"
 PARSER_VERSION = "interest-profile-parser-v1"
 SYSTEM_PROMPT = "You are an academic research assistant. Always respond in valid JSON."
 PROMPT = """Build a compact research-interest profile from the following user intent.
@@ -28,31 +28,66 @@ Topic hints:
 Respond in JSON with exactly these keys:
 - core_topics: array of 3-8 key topics
 - synonyms: array of related keywords or phrases
-- must_have: array of high-signal requirements
-- nice_to_have: array of positive but optional traits
-- exclude: array of phrases or concepts to avoid
-- summary: concise Chinese summary
+- summary: concise English summary
 
 JSON only, no markdown fences."""
 
 
-def load_or_create_interest_profile(config: AppConfig, provider: LLMProvider | None = None) -> InterestProfile:
-    os.makedirs(config.output_dir, exist_ok=True)
-    cache_path = Path(config.output_dir) / "interest_profile.json"
-    fingerprint = build_profile_fingerprint(config)
+def load_or_create_interest_profile(
+    config,
+    provider: LLMProvider | None = None,
+    *,
+    config_path: str | None = None,
+) -> InterestProfile:
+    del provider  # runtime no longer generates profiles; the file must already exist
 
-    if cache_path.exists():
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if cached.get("fingerprint") == fingerprint:
-                return parse_interest_profile(cached.get("profile", {}))
-        except Exception as exc:
-            logger.warning("Failed to load cached interest profile: %s", exc)
+    profile_path = _resolve_runtime_profile_path(config, config_path=config_path)
+    if not profile_path.exists():
+        raise RuntimeError(
+            f"Missing required interest profile file: {profile_path}. "
+            "Generate it from a user interest document before running this instance."
+        )
 
-    profile = generate_interest_profile(config, provider)
-    payload = {
-        "fingerprint": fingerprint,
+    with open(profile_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Invalid interest profile file: {profile_path}")
+    if payload.get("confirmed") is not True:
+        raise RuntimeError(
+            f"Interest profile is not confirmed for this instance: {profile_path}. "
+            "Confirm the profile before starting the container."
+        )
+    if not isinstance(payload.get("profile"), dict):
+        raise RuntimeError(f"Invalid interest profile payload in {profile_path}: missing profile object")
+
+    try:
+        return parse_interest_profile(payload["profile"])
+    except Exception as exc:
+        raise RuntimeError(f"Invalid interest profile payload in {profile_path}: {exc}") from exc
+
+
+def build_profile_fingerprint(profile: InterestProfile | dict) -> str:
+    if isinstance(profile, InterestProfile):
+        material = profile.to_dict()
+    elif isinstance(profile, dict) and "profile" in profile:
+        material = profile["profile"]
+    else:
+        material = profile
+    raw = json.dumps(material, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def build_interest_profile_payload(
+    profile: InterestProfile,
+    *,
+    confirmed: bool = True,
+    source: str = "generated_from_document",
+) -> dict:
+    return {
+        "confirmed": confirmed,
+        "source": source,
+        "fingerprint": build_profile_fingerprint(profile),
         "versions": {
             "prompt_version": PROMPT_VERSION,
             "schema_version": SCHEMA_VERSION,
@@ -60,57 +95,101 @@ def load_or_create_interest_profile(config: AppConfig, provider: LLMProvider | N
         },
         "profile": profile.to_dict(),
     }
-    with open(cache_path, "w", encoding="utf-8") as f:
+
+
+def write_interest_profile(profile_path: str | Path, payload: dict) -> None:
+    path = Path(profile_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    return profile
+        f.write("\n")
 
 
-def build_profile_fingerprint(config: AppConfig) -> str:
-    material = {
-        "interest_description": config.interest_description,
-        "topics": config.topics,
-        "llm_provider": config.llm.provider,
-        "llm_model": config.llm.model,
-        "llm_base_url": config.llm.base_url,
-        "prompt_version": PROMPT_VERSION,
-        "schema_version": SCHEMA_VERSION,
-        "parser_version": PARSER_VERSION,
-    }
-    raw = json.dumps(material, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def generate_interest_profile(config: AppConfig, provider: LLMProvider | None = None) -> InterestProfile:
-    if provider and config.interest_description:
+def generate_interest_profile(
+    *,
+    interest_description: str | None,
+    topics: list[str],
+    must_have: list[str] | None = None,
+    exclude: list[str] | None = None,
+    provider: LLMProvider | None = None,
+) -> InterestProfile:
+    must_have = list(must_have or [])
+    exclude = list(exclude or [])
+    if provider and interest_description:
         try:
             raw = provider.complete(
                 PROMPT.format(
-                    interest_description=config.interest_description,
-                    topics="、".join(config.topics) if config.topics else "无",
+                    interest_description=interest_description,
+                    topics=", ".join(topics) if topics else "None",
                 ),
                 system=SYSTEM_PROMPT,
             )
-            return parse_interest_profile(_extract_json(raw))
+            generated = parse_interest_profile(_extract_json(raw))
+            generated.must_have = must_have
+            generated.exclude = exclude
+            return generated
         except Exception as exc:
             logger.warning("Falling back to heuristic interest profile: %s", exc)
-    return build_simple_interest_profile(config)
+    return build_simple_interest_profile(
+        interest_description=interest_description,
+        topics=topics,
+        must_have=must_have,
+        exclude=exclude,
+    )
 
 
-def build_simple_interest_profile(config: AppConfig) -> InterestProfile:
-    core_topics = list(dict.fromkeys(config.topics))
+def build_simple_interest_profile(
+    *,
+    interest_description: str | None,
+    topics: list[str],
+    must_have: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> InterestProfile:
+    core_topics = list(dict.fromkeys(topics))
     summary_parts = []
-    if config.interest_description:
-        summary_parts.append(config.interest_description.strip())
+    if interest_description:
+        summary_parts.append(interest_description.strip())
     if core_topics:
-        summary_parts.append("关注主题：" + "、".join(core_topics))
+        summary_parts.append("Focus topics: " + ", ".join(core_topics))
     return InterestProfile(
         core_topics=core_topics,
         synonyms=[],
-        must_have=core_topics[:3],
+        must_have=list(must_have or []),
         nice_to_have=[],
-        exclude=[],
-        summary="；".join(summary_parts) if summary_parts else "基于 topics 生成的简化兴趣画像。",
+        exclude=list(exclude or []),
+        summary="; ".join(summary_parts) if summary_parts else "Simplified interest profile generated from topics.",
     )
+
+
+def select_query_synonyms(
+    profile: InterestProfile,
+    *,
+    existing_topics: list[str] | None = None,
+    limit: int = 3,
+) -> list[str]:
+    if limit <= 0:
+        return []
+
+    seen = {
+        _normalize_topic_for_query(item)
+        for item in (profile.core_topics + (existing_topics or []))
+        if _normalize_topic_for_query(item)
+    }
+    selected: list[str] = []
+    for synonym in profile.synonyms:
+        normalized = _normalize_topic_for_query(synonym)
+        if not normalized or normalized in seen:
+            continue
+        words = normalized.split()
+        if len(words) < 2:
+            continue
+        if len(normalized) < 10:
+            continue
+        selected.append(synonym.strip())
+        seen.add(normalized)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def parse_interest_profile(raw: dict | str) -> InterestProfile:
@@ -138,3 +217,14 @@ def parse_interest_profile(raw: dict | str) -> InterestProfile:
 
 def _extract_json(raw: str) -> dict:
     return parse_json_object(raw)
+
+
+def _normalize_topic_for_query(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value).lower()).strip()
+
+
+def _resolve_runtime_profile_path(config: AppConfig, *, config_path: str | None) -> Path:
+    config_path = config_path or getattr(config, "config_path", None)
+    if config_path:
+        return resolve_interest_profile_path(config_path=config_path)
+    return Path(config.output_dir) / "interest_profile.json"

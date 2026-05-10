@@ -4,34 +4,94 @@
   },
   "schedule": {
     "cron": "0 8 * * *",
-    "timezone": "UTC",
+    "timezone": "Asia/Hong_Kong",
     "run_on_start": true
   },
   "sources": {
-    "arxiv": {"enabled": true},
-    "biorxiv": {"enabled": true},
-    "nature": {"enabled": true, "journals": ["nature"]},
-    "science": {"enabled": true},
-    "acs": {"enabled": false}
+    "arxiv": {
+      "enabled": true
+    },
+    "biorxiv": {
+      "enabled": true
+    },
+    "nature": {
+      "enabled": true,
+      "journals": [
+        "nature"
+      ]
+    },
+    "science": {
+      "enabled": true
+    },
+    "acs": {
+      "enabled": false,
+      "journals": [
+        "jmcmar",
+        "jacsat",
+        "jctcce"
+      ]
+    }
   },
-  "interest_description": "持续关注你想监控的研究方向，优先关注方法创新、实验验证、泛化能力或你特别在意的研究特征。",
-  "topics": [
-    "example topic 1",
-    "example topic 2"
-  ],
   "time_range_hours": 24,
   "llm": {
-    "provider": "claude",
-    "model": "claude-sonnet-4-20250514",
-    "base_url": null
+    "provider": "openai_compatible",
+    "model": "gemini-3-flash",
+    "base_url": "https://api.poe.com/v1"
   },
+  "interest_profile_query": {
+    "expand_synonyms": true,
+    "max_query_synonyms": 3
+  },
+  "retention": {
+    "days": 30
+  },
+  "content_analysis": {},
   "email": {
     "recipient": "you@example.com",
-    "from": "Academic Monitor <onboarding@resend.dev>"
+    "from": "Academic Monitor <noreply@innoscreen.ai>",
+    "send_empty_notification": true
   },
   "output_dir": "output/my-monitor",
   "access": {
     "mode": "open_access",
     "auth_profile": null
+  },
+  "abstract_selection": {
+    "method": "candidate_score",
+    "three_llm_voting": {
+      "required_votes": 2,
+      "fallback_method": "candidate_score",
+      "judges": [
+        {
+          "name": "judge_1",
+          "provider": "openai_compatible",
+          "model": "gemini-3-flash",
+          "base_url": "https://api.poe.com/v1"
+        },
+        {
+          "name": "judge_2",
+          "provider": "openai_compatible",
+          "model": "gpt-4o",
+          "base_url": "https://api.poe.com/v1"
+        },
+        {
+          "name": "judge_3",
+          "provider": "openai_compatible",
+          "model": "claude-haiku-4.5",
+          "base_url": "https://api.poe.com/v1"
+        }
+      ]
+    }
+  },
+  "candidate_scoring": {
+    "threshold": 0.6,
+    "fail_open": false,
+    "exclude_penalty_weight": 0.3,
+    "weights": {
+      "topic_match": 0.4,
+      "must_have_match": 0.2,
+      "evidence_strength": 0.25,
+      "focus_specificity": 0.15
+    }
   }
 }

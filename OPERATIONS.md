@@ -19,55 +19,65 @@ For Windows, the preferred operational model is **host-scheduled one-shot runs**
   - `RESEND_API_KEY`
   - `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 - Writable host `output/` directory
-- One JSON config per monitor instance under `configs/`
+- One JSON config per monitor instance under `instances/`
 
 ## Add a New Monitor Instance
 
-### 1. Create a config file
+### 1. Create a config file and interest profile
 
-Copy one of the example configs and adjust:
+Either copy the template manually:
 
 ```bash
-cp configs/bio-monitor.json configs/my-monitor.json
+mkdir -p instances/my-monitor
+cp instances/bio-monitor/config.json instances/my-monitor/config.json
+cp instances/bio-monitor/interest_profile.json instances/my-monitor/interest_profile.json
+```
+
+Or, preferably, generate both the instance config and the required profile file from a user interest document:
+
+```bash
+python3 scripts/generate_config_from_doc.py \
+  --input docs/my-interest.md \
+  --output instances/my-monitor/config.json \
+  --user-name my-monitor \
+  --email you@example.com
 ```
 
 Update at minimum:
 
 - `user.name`
 - `schedule.cron`
-- `topics`
-- `interest_description`
 - `email.recipient`
+- `email.send_empty_notification`
 - `output_dir`
+- `retention.days`
 - source enablement under `sources`
+- `instances/<instance>/interest_profile.json`
 
 Rules:
 
-- `schedule.timezone` must be `UTC` in the current implementation
-- `output_dir` should be unique per instance, e.g. `output/my-monitor`
+- `schedule.timezone` should normally be `Asia/Hong_Kong` (supported values: `Asia/Hong_Kong`, `UTC`)
+- `output_dir` should be unique per instance and stay under the repo-level `output/` tree, e.g. `output/my-monitor` (do not point it into `instances/`)
 - `user.name` should be unique per instance
+- `instances/<instance>/interest_profile.json` must exist and be confirmed before runtime starts
+- `config.json` must not contain `topics`, `interest_description`, `must_have`, or `exclude`
 - keep secrets out of instance config files
 - in Windows one-shot mode, `schedule.cron` and `schedule.run_on_start` are informational only; Task Scheduler is the actual schedule source
 
-### 2. Add a service to Compose
+### 2. Regenerate the Compose file
 
-Example service block:
+Regenerate the Compose file from all instance configs:
 
-```yaml
-  my-monitor:
-    build: .
-    container_name: academic-monitor-my-monitor
-    env_file:
-      - .env
-    environment:
-      CONFIG_PATH: /app/config.json
-    volumes:
-      - ./output:/app/output
-      - ./configs/my-monitor.json:/app/config.json:ro
-    restart: unless-stopped
+```bash
+python3 scripts/generate_compose_from_instances.py
 ```
 
-You can add this block to `docker-compose.multi-instance.yml` or maintain a site-specific compose file.
+The generated `docker-compose.multi-instance.yml` uses:
+
+- `service name = user.name`
+- `container_name = user.name`
+
+Do not hand-edit service blocks; treat the compose file as generated output.
 
 ### 2b. Windows one-shot runtime (recommended on Windows)
 
@@ -80,23 +90,28 @@ docker build -t news-monitor:latest .
 Then run a single instance manually:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath configs\my-monitor.json
+powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath instances\my-monitor\config.json
 ```
 
-This starts a transient container with `docker run --rm`, mounts the selected config as `/app/config.json`, mounts the configured output directory to `/app/output`, runs the monitor once, and removes the container on completion.
+This starts a transient container with `docker run --rm`, mounts the selected instance directory as `/app/instance`, mounts the configured output directory to `/app/output`, runs the monitor once, and removes the container on completion.
+
+Because this wrapper runs `python /app/run.py` directly, Windows one-shot runs still apply `retention.days` to dated files in `output_dir`, but they do not exercise the container-internal `/var/log/cron.log` trimming path from `entrypoint.sh`.
 
 The script first checks Docker readiness. If Docker Desktop is not ready, it attempts to start Docker Desktop and waits for the engine to become ready for up to 5 minutes before running the container.
+
+The one-shot container name is also taken from `user.name`. If a stale container with that name already exists, the script stops and asks you to remove it first.
 
 ### 3. Start the new instance
 
 ```bash
-docker compose -f docker-compose.multi-instance.yml up --build -d my-monitor
+python3 scripts/generate_compose_from_instances.py
+docker compose -f docker-compose.multi-instance.yml up -d my-monitor
 ```
 
 For Windows one-shot scheduling, instead of a long-running Compose service, create a Task Scheduler job that runs:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\path\to\repo\scripts\run-monitor.ps1 -RepoRoot C:\path\to\repo -ConfigPath configs\my-monitor.json
+powershell -ExecutionPolicy Bypass -File C:\path\to\repo\scripts\run-monitor.ps1 -RepoRoot C:\path\to\repo -ConfigPath instances\my-monitor\config.json
 ```
 
 Recommended Task Scheduler setting: run the task only when the user is logged in, so Docker Desktop can be started interactively if needed.
@@ -106,7 +121,7 @@ Recommended Task Scheduler setting: run the task only when the user is logged in
 Check logs:
 
 ```bash
-docker logs -f academic-monitor-my-monitor
+docker logs -f my-monitor
 ```
 
 Expected startup flow:
@@ -115,7 +130,7 @@ Expected startup flow:
 - runtime cron file is generated
 - optional startup run happens if `schedule.run_on_start=true`
 - cron starts and tails `/var/log/cron.log`
-- `/var/log/cron.log` should be rotated by the container platform or host log pipeline for long-running deployments
+- `/var/log/cron.log` is trimmed automatically to the configured retention window (`retention.days`, default 30)
 
 For Windows one-shot mode, verify instead:
 
@@ -133,9 +148,17 @@ Each instance should write only to its own directory, for example:
 
 ```text
 output/my-monitor/
-  interest_profile.json
   academic_report_YYYY-MM-DD.html
   academic_report_YYYY-MM-DD.pdf
+  run_stats_YYYY-MM-DD.json
+```
+
+The monitor definition files stay under:
+
+```text
+instances/my-monitor/
+  config.json
+  interest_profile.json
 ```
 
 ### Check schedule behavior
@@ -148,7 +171,7 @@ output/my-monitor/
 
 - verify report emails arrive at `email.recipient`
 - verify sender matches `email.from`
-- if no papers are selected, verify the empty-notification variant is sent
+- if no papers are selected, verify the empty-notification variant is sent only when `email.send_empty_notification=true`
 
 ## Common Failure Modes
 
@@ -157,6 +180,7 @@ output/my-monitor/
 Likely causes:
 
 - config file missing
+- `interest_profile.json` missing or not confirmed
 - invalid `schedule.cron`
 - invalid `schedule.timezone`
 - invalid email or missing required config field
@@ -168,7 +192,8 @@ Check:
 
 - source enablement in config
 - whether the topic/interest profile is too restrictive
-- whether all candidate papers were filtered out at relevance stage
+- whether selected synonym expansion, profile-level `must_have` / `exclude`, or candidate threshold needs tuning
+- whether all candidate papers were filtered out at abstract-gate or relevance stage
 - whether external APIs are failing
 
 ### Repeated skipping due to lock
@@ -207,14 +232,16 @@ docker compose -f docker-compose.multi-instance.yml restart my-monitor
 
 Notes:
 
-- interest profile cache is fingerprinted on config + internal prompt/schema/parser versions
-- changing model, topics, or interest description triggers cache refresh on next run
+- `interest_profile.json` is the runtime source of truth for interest matching
+- if you change user interests, regenerate or edit `instances/<instance>/interest_profile.json` before the next run
+- source recall uses `core_topics + selected_synonyms`
+- exclude decisions are made by the abstract-level LLM gate, not a local hard exclude filter
 - in Windows one-shot mode, if you change only the config file, the next scheduled Task Scheduler run picks it up automatically; no always-on container restart is needed
 
 ## Recommended Naming Convention
 
-- config file: `configs/<instance>.json`
-- container name: `academic-monitor-<instance>`
+- config file: `instances/<instance>/config.json`
+- container/service name: `user.name`
 - output dir: `output/<instance>`
 - `user.name`: `<instance>`
 

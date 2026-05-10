@@ -26,6 +26,10 @@ ACS_FEEDS = {
         "name": "ACS Chemical Biology",
         "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=acbcct",
     },
+    "jctcce": {
+        "name": "Journal of Chemical Theory and Computation",
+        "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jctcce",
+    },
 }
 
 HEADERS = {
@@ -38,7 +42,7 @@ class ACSSource(PaperSource):
     name = "ACS Publications"
 
     def __init__(self, journals: list[str] | None = None):
-        self.journals = journals or ["jmcmar", "jacsat"]
+        self.journals = journals or ["jmcmar", "jacsat", "jctcce"]
 
     def fetch_papers(self, topics: list[str], hours: int) -> list[Paper]:
         cutoff = self._cutoff_time(hours)

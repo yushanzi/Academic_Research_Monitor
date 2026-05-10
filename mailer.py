@@ -9,6 +9,12 @@ from config_schema import DEFAULT_EMAIL_FROM
 logger = logging.getLogger(__name__)
 
 
+def _topics_text(config: dict) -> str:
+    profile = config.get("interest_profile") or {}
+    topics = profile.get("core_topics", [])
+    return "、".join(topics) if topics else "未配置 interest_profile.core_topics"
+
+
 def _response_id(response) -> str:
     if isinstance(response, dict):
         return str(response.get("id", "unknown"))
@@ -43,8 +49,7 @@ def send_report(
 
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
     monitor_name = config.get("user", {}).get("name", "academic-monitor")
-    topics = config.get("topics", [])
-    topics_str = "、".join(topics) if topics else "未配置 topics"
+    topics_str = _topics_text(config)
 
     with open(pdf_path, "rb") as f:
         pdf_data = f.read()
@@ -90,7 +95,7 @@ def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_ca
 
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
     monitor_name = config.get("user", {}).get("name", "academic-monitor")
-    topics_str = "、".join(config.get("topics", []))
+    topics_str = _topics_text(config)
 
     if reason == "no_relevant":
         message = "今日发现候选论文，但没有通过高相关性筛选。"
