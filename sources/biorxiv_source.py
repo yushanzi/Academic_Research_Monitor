@@ -1,13 +1,12 @@
 import logging
 from datetime import datetime, timezone
 
-import requests
+from curl_cffi import requests
 
 from models import Paper
-from .base import PaperSource, build_paper, matches_topics
+from .base import PaperSource, build_paper, matches_topics, BROWSER_HEADERS, IMPERSONATE
 
 logger = logging.getLogger(__name__)
-USER_AGENT = "AcademicResearchMonitor/1.0 (+local deployment)"
 
 BIORXIV_API = "https://api.biorxiv.org/details/biorxiv"
 
@@ -33,7 +32,12 @@ class BiorxivSource(PaperSource):
         while True:
             try:
                 url = f"{BIORXIV_API}/{start_date}/{end_date}/{cursor}"
-                resp = requests.get(url, timeout=30, headers={"User-Agent": USER_AGENT})
+                resp = requests.get(
+                    url,
+                    timeout=30,
+                    headers=BROWSER_HEADERS,
+                    impersonate=IMPERSONATE,
+                )
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:

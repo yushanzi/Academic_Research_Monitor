@@ -1,14 +1,14 @@
 import unittest
 from unittest.mock import Mock, patch
 
-import requests
+from curl_cffi.requests.errors import RequestsError
 
 from sources.base import scrape_html_with_retries
 
 
 class SourceScrapingHelperTests(unittest.TestCase):
     def test_scrape_html_retries_retryable_status_then_succeeds(self):
-        retryable = requests.HTTPError("retryable")
+        retryable = RequestsError("retryable")
         retryable.response = Mock(status_code=503)
 
         response = Mock()

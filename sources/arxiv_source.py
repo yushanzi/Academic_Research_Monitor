@@ -3,13 +3,12 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-import requests
+from curl_cffi import requests
 
 from models import Paper
-from .base import PaperSource, build_paper
+from .base import PaperSource, build_paper, BROWSER_HEADERS, IMPERSONATE
 
 logger = logging.getLogger(__name__)
-USER_AGENT = "AcademicResearchMonitor/1.0 (+local deployment)"
 
 ARXIV_API = "http://export.arxiv.org/api/query"
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -45,7 +44,8 @@ class ArxivSource(PaperSource):
             ARXIV_API,
             params=params,
             timeout=30,
-            headers={"User-Agent": USER_AGENT},
+            headers=BROWSER_HEADERS,
+            impersonate=IMPERSONATE,
         )
         resp.raise_for_status()
 

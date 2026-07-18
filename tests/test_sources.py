@@ -3,8 +3,12 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from sources.acs_source import ACS_FEEDS, ACSSource
-from sources.arxiv_source import ArxivSource, USER_AGENT as ARXIV_USER_AGENT
-from sources.biorxiv_source import BIORXIV_API, BiorxivSource, USER_AGENT as BIORXIV_USER_AGENT
+from sources.arxiv_source import ArxivSource
+from sources.base import BROWSER_HEADERS
+from sources.biorxiv_source import BIORXIV_API, BiorxivSource
+
+ARXIV_USER_AGENT = BROWSER_HEADERS["User-Agent"]
+BIORXIV_USER_AGENT = BROWSER_HEADERS["User-Agent"]
 
 
 class SourceTests(unittest.TestCase):
