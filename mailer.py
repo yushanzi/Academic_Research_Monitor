@@ -9,6 +9,16 @@ from config_schema import DEFAULT_EMAIL_FROM
 logger = logging.getLogger(__name__)
 
 
+def _recipient_list(email_cfg: dict) -> list[str]:
+    raw = email_cfg.get("recipient", "")
+    if isinstance(raw, str):
+        recipient = raw.strip()
+        return [recipient] if recipient else []
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return []
+
+
 def _topics_text(config: dict) -> str:
     profile = config.get("interest_profile") or {}
     topics = profile.get("core_topics", [])
@@ -43,8 +53,8 @@ def send_report(
     resend.api_key = api_key
 
     email_cfg = config.get("email", {})
-    recipient = email_cfg.get("recipient", "")
-    if not recipient:
+    recipients = _recipient_list(email_cfg)
+    if not recipients:
         raise ValueError("No email recipient configured")
 
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
@@ -59,7 +69,7 @@ def send_report(
 
     params = {
         "from": sender,
-        "to": [recipient],
+        "to": recipients,
         "subject": f"[{monitor_name}] 学术研究监控报告 - {date_str}",
         "html": (
             f"<p>您好，</p>"
@@ -89,8 +99,8 @@ def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_ca
 
     resend.api_key = api_key
     email_cfg = config.get("email", {})
-    recipient = email_cfg.get("recipient", "")
-    if not recipient:
+    recipients = _recipient_list(email_cfg)
+    if not recipients:
         return
 
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
@@ -106,7 +116,7 @@ def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_ca
 
     params = {
         "from": sender,
-        "to": [recipient],
+        "to": recipients,
         "subject": f"[{monitor_name}] 学术研究监控报告 - {date_str} {suffix}",
         "html": (
             f"<p>您好，</p>"

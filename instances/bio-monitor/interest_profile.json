@@ -1,7 +1,7 @@
 {
   "confirmed": true,
   "source": "generated_from_document",
-  "fingerprint": "25147afa6802d41b2c67d36314a19efb9c9e6c179014cb8ac1535c8f970330b3",
+  "fingerprint": "ae030f75a574d9fc951cb5a3a871d2381b08bfa9d896ea108f73df2a606e0b57",
   "versions": {
     "prompt_version": "interest-profile-v4",
     "schema_version": "interest-profile-schema-v3",
@@ -9,17 +9,21 @@
   },
   "profile": {
     "core_topics": [
-      "protein language model",
-      "protein structure prediction",
-      "AI for drug discovery",
-      "structure-based design"
+      "protein folding dynamics",
+      "folding pathways",
+      "intermediate structural states",
+      "experimental protein folding studies",
+      "computational protein folding modeling"
     ],
-    "synonyms": [],
-    "must_have": [
-      
+    "synonyms": [
+      "protein folding intermediates",
+      "conformational dynamics",
+      "folding state prediction",
+      "folding trajectory analysis"
     ],
+    "must_have": [],
     "nice_to_have": [],
     "exclude": [],
-    "summary": "Track protein language models, protein structure prediction, AI for drug discovery, and structure-based design."
+    "summary": "Track literature on protein folding dynamics across experimental observations and computational modeling, with emphasis on folding pathways and prediction of intermediate structural states."
   }
 }

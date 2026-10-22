@@ -1,0 +1,1 @@
+Merged monitor for small-molecule and antibody drug discovery/design, covering hit-to-lead optimization, structure-based and physics-based design, AI and quantum chemistry methods, binding pocket prediction, molecular generation, ADMET modeling, virtual screening, retrosynthesis, target identification, antibody engineering, and miniprotein binder design.

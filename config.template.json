@@ -17,11 +17,19 @@
     "nature": {
       "enabled": true,
       "journals": [
-        "nature"
+        "nature",
+        "ncomms",
+        "nbt",
+        "nmeth",
+        "nm"
       ]
     },
     "science": {
-      "enabled": true
+      "enabled": true,
+      "journals": [
+        "science",
+        "sciadv"
+      ]
     },
     "acs": {
       "enabled": false,

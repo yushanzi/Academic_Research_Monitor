@@ -173,13 +173,59 @@ Look for logs such as:
 
 If a Windows container cannot read mounted directories, first check Docker Desktop file sharing / path access settings.
 
-For Windows one-shot deployment, manually run one instance first:
+### Step 4a: Windows Docker Desktop validation sequence
+
+Use this sequence when preparing a Windows host for Docker Desktop deployment.
+
+Windows preflight:
+
+- Docker Desktop is installed and `docker info` succeeds
+- the repo path is accessible to Docker Desktop
+- `.env` exists in the repo root
+- `instances/<instance>/config.json` exists
+- `instances/<instance>/interest_profile.json` exists and is confirmed
+- LF-sensitive files such as `entrypoint.sh`, `Dockerfile`, `docker-compose.multi-instance.yml`, and `scripts/run-monitor.ps1` have not regressed to CRLF
+
+Optional host-side validation:
+
+- run the unit test suite if Python is available on the Windows host
+- optionally run `python3 run.py --config instances/bio-monitor/config.json --dry-run` before using Docker
+
+Build a Windows smoke-test image:
+
+```bash
+docker build -t news-monitor:windows-smoke .
+```
+
+Run a Windows dry-run container first:
+
+```powershell
+$repoRoot = (Resolve-Path .).Path
+docker run --rm `
+  --env-file "$repoRoot\.env" `
+  --name bio-monitor-dry-run `
+  -v "${repoRoot}\instances\bio-monitor:/app/instance:ro" `
+  -v "${repoRoot}\output:/app/output" `
+  --entrypoint python `
+  news-monitor:windows-smoke /app/run.py --config /app/instance/config.json --dry-run
+```
+
+Repeat the dry-run for every config that will be deployed.
+
+Dry-run pass criteria:
+
+- exit code is `0`
+- no config validation or mount errors occur
+- output is written only under the configured `output/<instance>/`
+- no accidental nested path such as `output/bio-monitor/bio-monitor/` is created
+
+Then run the final live wrapper smoke test:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath instances\bio-monitor\config.json
 ```
 
-Expected checks:
+Wrapper smoke-test pass criteria:
 
 - a fresh container is created
 - Docker Desktop starts automatically if it was not already ready
@@ -188,6 +234,13 @@ Expected checks:
 - output files are written successfully
 - old dated files in `output/<instance>/` are trimmed according to `retention.days`
 - `/var/log/cron.log` retention is not part of this one-shot check because the PowerShell wrapper bypasses `entrypoint.sh`
+
+Troubleshooting reminders:
+
+- if Docker CLI is not available, ensure Docker Desktop is installed and `docker` is in `PATH`
+- if mounted directories are not readable, check Docker Desktop file sharing / path access settings
+- if the wrapper stops immediately, look for a stale container with the same `user.name`
+- if shell/runtime files fail unexpectedly, re-check CRLF conversion on Docker- and shell-sensitive files
 
 ---
 
@@ -266,6 +319,12 @@ For Windows one-shot deployment, create separate Task Scheduler tasks such as:
 
 - `AcademicResearchMonitor-Bio`
 - `AcademicResearchMonitor-Chem`
+
+You can also register/update all Windows tasks with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\repo\scripts\register-windows-tasks.ps1 -RepoRoot C:\path\to\repo -DailyAt 08:00
+```
 
 ### Step 4: Check container status
 

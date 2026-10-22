@@ -1,0 +1,16 @@
+I am seeking literature on machine-learning force fields for composite polymer electrolytes, with emphasis on accurately modeling long-range interactions and ion transport behavior. Please prioritize methods, benchmarks, and simulations that improve physical realism or predictive performance for these systems.
+
+Topics:
+- machine-learning force fields
+- long-range interactions
+- composite polymer electrolytes
+- polymer electrolyte simulation
+- ionic transport modeling
+
+Must have:
+- long-range electrostatics or long-range interaction modeling
+- application to composite or polymer electrolyte systems
+
+Exclude:
+- unrelated biomolecular force fields
+- purely generic review articles

@@ -32,7 +32,7 @@ class LLMConfig:
 
 @dataclass
 class EmailConfig:
-    recipient: str = ""
+    recipient: str | list[str] = ""
     from_address: str = DEFAULT_EMAIL_FROM
     send_empty_notification: bool = True
 

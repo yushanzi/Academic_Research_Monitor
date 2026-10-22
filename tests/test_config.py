@@ -38,6 +38,13 @@ class ConfigSchemaTests(unittest.TestCase):
             config = app_config_from_dict(payload, config_path=f"{tmp}/config.json")
         self.assertFalse(config.email.send_empty_notification)
 
+    def test_email_recipient_supports_multiple_addresses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["email"]["recipient"] = ["user@example.com", "other@example.com"]
+            config = app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertEqual(config.email.recipient, ["user@example.com", "other@example.com"])
+
     def test_resolve_output_dir_path_uses_app_root_for_container_instance_mount(self):
         path = resolve_output_dir_path("output/bio-monitor", config_path="/app/instance/config.json")
         self.assertEqual(str(path), "/app/output/bio-monitor")

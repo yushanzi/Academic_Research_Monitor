@@ -87,13 +87,33 @@ Build the image once:
 docker build -t news-monitor:latest .
 ```
 
-Then run a single instance manually:
+Dry-run a single instance first:
+
+```powershell
+$repoRoot = (Resolve-Path .).Path
+docker run --rm `
+  --env-file "$repoRoot\.env" `
+  --name my-monitor-dry-run `
+  -v "${repoRoot}\instances\my-monitor:/app/instance:ro" `
+  -v "${repoRoot}\output:/app/output" `
+  --entrypoint python `
+  news-monitor:latest /app/run.py --config /app/instance/config.json --dry-run
+```
+
+Dry-run expectations:
+
+- the container exits with code `0`
+- no config validation or mount errors occur
+- output is written only under the configured `output/<instance>/`
+- no accidental nested path such as `output/my-monitor/my-monitor/` is created
+
+Then run the bundled PowerShell wrapper once as the final manual smoke test:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath instances\my-monitor\config.json
 ```
 
-This starts a transient container with `docker run --rm`, mounts the selected instance directory as `/app/instance`, mounts the configured output directory to `/app/output`, runs the monitor once, and removes the container on completion.
+This starts a transient container with `docker run --rm`, mounts the selected instance directory as `/app/instance`, mounts the repo `output/` root as `/app/output`, runs the monitor once, and removes the container on completion. This wrapper is a real run, not a `--dry-run`; use a staging recipient or a temporary config copy if you need to avoid sending production email during validation.
 
 Because this wrapper runs `python /app/run.py` directly, Windows one-shot runs still apply `retention.days` to dated files in `output_dir`, but they do not exercise the container-internal `/var/log/cron.log` trimming path from `entrypoint.sh`.
 
@@ -113,6 +133,14 @@ For Windows one-shot scheduling, instead of a long-running Compose service, crea
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\path\to\repo\scripts\run-monitor.ps1 -RepoRoot C:\path\to\repo -ConfigPath instances\my-monitor\config.json
 ```
+
+To create/update all Windows tasks in one step, you can script the registration:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\repo\scripts\register-windows-tasks.ps1 -RepoRoot C:\path\to\repo -DailyAt 08:00
+```
+
+This creates one daily task per `instances/*/config.json` and uses the Windows host's local timezone for the trigger time.
 
 Recommended Task Scheduler setting: run the task only when the user is logged in, so Docker Desktop can be started interactively if needed.
 
@@ -134,7 +162,8 @@ Expected startup flow:
 
 For Windows one-shot mode, verify instead:
 
-- the Task Scheduler job starts successfully
+- the dry-run command succeeds before scheduling is configured
+- the manual wrapper smoke test succeeds before creating a Task Scheduler job
 - Docker Desktop starts automatically if it was not already ready
 - the transient container appears and exits
 - output files are written to the configured output directory

@@ -207,7 +207,7 @@ For Windows, the recommended deployment model is:
 - Windows Task Scheduler starts a fresh container for each scheduled run
 - the container runs once and exits
 
-Use the bundled PowerShell wrapper:
+Use the bundled PowerShell wrapper for the final manual smoke test or for Task Scheduler:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-monitor.ps1 -ConfigPath instances\bio-monitor\config.json
@@ -235,18 +235,46 @@ If a stale container with the same `user.name` already exists, the PowerShell wr
 
 This auto-start behavior is intended for Windows Task Scheduler tasks that run **while the user is logged in**.
 
+Important:
+
+- `scripts/run-monitor.ps1` performs a **real run**; it is **not** a `--dry-run`
+- if you do not want to send production email during Windows validation, use a staging recipient or a temporary config copy first
+
 Recommended Windows workflow:
 
 1. Build the image once
-2. Run the PowerShell wrapper manually once
-3. Create one Task Scheduler job per config file
-4. Let Task Scheduler trigger one-shot container runs at the desired times
+2. Run a manual container dry-run:
+
+```powershell
+$repoRoot = (Resolve-Path .).Path
+docker run --rm `
+  --env-file "$repoRoot\.env" `
+  --name bio-monitor-dry-run `
+  -v "${repoRoot}\instances\bio-monitor:/app/instance:ro" `
+  -v "${repoRoot}\output:/app/output" `
+  --entrypoint python `
+  news-monitor:latest /app/run.py --config /app/instance/config.json --dry-run
+```
+
+3. Run the PowerShell wrapper manually once as the final Windows smoke test
+4. Create one Task Scheduler job per config file
+5. Let Task Scheduler trigger one-shot container runs at the desired times
+
+You can create/update the Windows Task Scheduler jobs with a script instead of clicking through the GUI:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\register-windows-tasks.ps1 -RepoRoot C:\path\to\repo -DailyAt 08:00
+```
+
+This registers one daily task per `instances/*/config.json` using `scripts/run-monitor.ps1` as the task action. `-DailyAt` is interpreted in the Windows host's local timezone.
 
 Example image build:
 
 ```bash
 docker build -t news-monitor:latest .
 ```
+
+For ongoing multi-instance services on Docker Desktop, Compose is still supported, but it is **not** the preferred Windows runtime model.
 
 ## Output
 

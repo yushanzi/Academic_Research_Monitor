@@ -10,7 +10,12 @@ from .base import PaperSource, build_paper, matches_topics, scrape_html_with_ret
 
 logger = logging.getLogger(__name__)
 
-SCIENCE_RSS = "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science"
+SCIENCE_RSS_BY_JOURNAL = {
+    "science": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+    "sciadv": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv",
+    "sciimmunol": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciimmunol",
+    "scirobotics": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=scirobotics",
+}
 HEADERS = {
     "User-Agent": "AcademicResearchMonitor/1.0 (+local deployment)"
 }
@@ -20,58 +25,69 @@ SCRAPE_BUDGET_SECONDS = 45
 class ScienceSource(PaperSource):
     name = "Science"
 
+    def __init__(self, journals: list[str] | None = None):
+        self.journals = journals or ["science"]
+
     def fetch_papers(self, topics: list[str], hours: int) -> list[Paper]:
         cutoff = self._cutoff_time(hours)
         papers = []
         deadline_monotonic = time.monotonic() + SCRAPE_BUDGET_SECONDS
 
-        try:
-            feed = feedparser.parse(SCIENCE_RSS)
-            for entry in feed.entries:
-                published = None
-                if hasattr(entry, "published_parsed") and entry.published_parsed:
-                    published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-                elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
-                    published = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
-                if not published or published < cutoff:
-                    continue
+        for journal in self.journals:
+            feed_url = SCIENCE_RSS_BY_JOURNAL.get(journal)
+            if not feed_url:
+                logger.warning("Science: unsupported journal code '%s'; skipping", journal)
+                continue
 
-                title = entry.get("title", "")
-                description = entry.get("summary", "")
-                link = entry.get("link", "")
+            try:
+                feed = feedparser.parse(feed_url)
+                batch = []
+                for entry in feed.entries:
+                    published = None
+                    if hasattr(entry, "published_parsed") and entry.published_parsed:
+                        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
+                        published = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
+                    if not published or published < cutoff:
+                        continue
 
-                if not matches_topics(f"{title} {description}", topics):
-                    continue
+                    title = entry.get("title", "")
+                    description = entry.get("summary", "")
+                    link = entry.get("link", "")
 
-                abstract = self._scrape_abstract(link, deadline_monotonic) if link else description
-                if not abstract:
-                    abstract = description
+                    if not matches_topics(f"{title} {description}", topics):
+                        continue
 
-                authors = []
-                if hasattr(entry, "authors"):
-                    authors = [a.get("name", "") for a in entry.authors if a.get("name")]
+                    abstract = self._scrape_abstract(link, deadline_monotonic) if link else description
+                    if not abstract:
+                        abstract = description
 
-                doi = ""
-                if hasattr(entry, "prism_doi"):
-                    doi = entry.prism_doi
-                elif "doi.org" in link:
-                    doi = link.split("doi.org/")[-1]
+                    authors = []
+                    if hasattr(entry, "authors"):
+                        authors = [a.get("name", "") for a in entry.authors if a.get("name")]
 
-                papers.append(
-                    build_paper(
-                        title=title,
-                        authors=authors,
-                        abstract=abstract,
-                        date=published.strftime("%Y-%m-%d"),
-                        url=link,
-                        source="Science",
-                        doi=doi,
+                    doi = ""
+                    if hasattr(entry, "prism_doi"):
+                        doi = entry.prism_doi
+                    elif "doi.org" in link:
+                        doi = link.split("doi.org/")[-1]
+
+                    batch.append(
+                        build_paper(
+                            title=title,
+                            authors=authors,
+                            abstract=abstract,
+                            date=published.strftime("%Y-%m-%d"),
+                            url=link,
+                            source="Science",
+                            doi=doi,
+                        )
                     )
-                )
 
-            logger.info("Science: found %s papers", len(papers))
-        except Exception as e:
-            logger.error("Science: error fetching feed: %s", e)
+                papers.extend(batch)
+                logger.info("Science (%s): found %s papers", journal, len(batch))
+            except Exception as e:
+                logger.error("Science (%s): error fetching feed: %s", journal, e)
 
         return papers
 

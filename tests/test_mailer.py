@@ -73,3 +73,31 @@ class MailerTests(unittest.TestCase):
                 self.mailer.send_empty_notification(config, "2026-03-30")
 
         mock_send.assert_not_called()
+
+    def test_send_report_supports_multiple_recipients(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"%PDF-1.4 test")
+            pdf_path = tmp.name
+
+        config = {
+            "user": {"name": "monitor-a"},
+            "interest_profile": {"core_topics": ["protein folding"]},
+            "email": {
+                "recipient": ["user@example.com", "other@example.com"],
+                "from": "Monitor <sender@example.com>",
+            },
+        }
+
+        try:
+            with patch.dict(os.environ, {"RESEND_API_KEY": "re_test"}, clear=False):
+                with patch.object(
+                    self.mailer.resend.Emails,
+                    "send",
+                    return_value={"id": "email_123"},
+                ) as mock_send:
+                    self.mailer.send_report(pdf_path, 2, config, "2026-03-30")
+        finally:
+            os.remove(pdf_path)
+
+        params = mock_send.call_args.args[0]
+        self.assertEqual(params["to"], ["user@example.com", "other@example.com"])

@@ -17,11 +17,19 @@
     "nature": {
       "enabled": true,
       "journals": [
-        "nature"
+        "nature",
+        "ncomms",
+        "nbt",
+        "nmeth",
+        "nm"
       ]
     },
     "science": {
-      "enabled": true
+      "enabled": true,
+      "journals": [
+        "science",
+        "sciadv"
+      ]
     },
     "acs": {
       "enabled": false,
@@ -39,7 +47,7 @@
     "base_url": "https://api.poe.com/v1"
   },
   "email": {
-    "recipient": "you@example.com",
+    "recipient": "yushanzi@hotmail.com",
     "send_empty_notification": true,
     "from": "Academic Monitor <noreply@innoscreen.ai>"
   },
@@ -51,6 +59,9 @@
   "interest_profile_query": {
     "expand_synonyms": true,
     "max_query_synonyms": 3
+  },
+  "retention": {
+    "days": 30
   },
   "content_analysis": {
     "llm": null
@@ -91,17 +102,6 @@
       "must_have_match": 0.2,
       "evidence_strength": 0.25,
       "focus_specificity": 0.15
-    }
-  },
-  "relevance_scoring": {
-    "threshold": 0.65,
-    "exclude_penalty_weight": 0.3,
-    "weights": {
-      "topic_match": 0.35,
-      "must_have_match": 0.2,
-      "evidence_quality": 0.2,
-      "content_alignment": 0.15,
-      "actionability": 0.1
     }
   }
 }

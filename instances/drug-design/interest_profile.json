@@ -1,0 +1,48 @@
+{
+  "confirmed": true,
+  "source": "merged_from_chem_monitor_and_drug_design",
+  "fingerprint": "8fca571bf083f84451902c3af98b5abc6f24b8ec7f2cab841a62cfb3ebaf9827",
+  "versions": {
+    "prompt_version": "interest-profile-v4",
+    "schema_version": "interest-profile-schema-v3",
+    "parser_version": "interest-profile-parser-v1"
+  },
+  "profile": {
+    "core_topics": [
+      "small molecule drug discovery methods",
+      "small molecule drug design",
+      "hit-to-lead optimization",
+      "structure-based drug design",
+      "antibody drug discovery and design",
+      "physics-based molecular design",
+      "AI-driven drug discovery",
+      "quantum chemistry for drug design",
+      "binding pocket prediction",
+      "molecular generation",
+      "ADMET modeling",
+      "virtual screening"
+    ],
+    "synonyms": [
+      "computer-aided drug design",
+      "structure-guided ligand design",
+      "lead optimization",
+      "AI drug design",
+      "molecular design methodology",
+      "quantum chemistry workflows",
+      "ligand binding site prediction",
+      "de novo molecule generation",
+      "retrosynthesis prediction",
+      "target identification",
+      "antibody engineering",
+      "miniprotein binder design"
+    ],
+    "must_have": [],
+    "nice_to_have": [
+      "combined physics-based and AI methods",
+      "benchmarking against experimental or prospective validation",
+      "methodology papers for hit-to-lead optimization"
+    ],
+    "exclude": [],
+    "summary": "Track methods for small-molecule and antibody drug discovery/design, combining the former chem-monitor focus on hit-to-lead optimization, structure-based design, AI, and quantum chemistry with the broader drug-design focus on binding pocket prediction, molecular generation, ADMET modeling, virtual screening, retrosynthesis, target identification, antibody engineering, and miniprotein binder design."
+  }
+}

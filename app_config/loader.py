@@ -115,9 +115,23 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
     if base_url is not None:
         base_url = str(base_url).strip() or None
 
-    recipient = str(email_raw.get("recipient", "")).strip()
-    if not recipient or not EMAIL_RE.match(recipient):
-        raise ValueError("email.recipient must be a valid email address")
+    recipient = email_raw.get("recipient", "")
+    if isinstance(recipient, str):
+        recipient = recipient.strip()
+        if not recipient or not EMAIL_RE.match(recipient):
+            raise ValueError("email.recipient must be a valid email address")
+    elif isinstance(recipient, list):
+        normalized_recipients = [str(item).strip() for item in recipient if str(item).strip()]
+        if not normalized_recipients:
+            raise ValueError("email.recipient must contain at least one valid email address")
+        invalid_recipients = [item for item in normalized_recipients if not EMAIL_RE.match(item)]
+        if invalid_recipients:
+            raise ValueError(
+                "email.recipient contains invalid email address(es): " + ", ".join(invalid_recipients)
+            )
+        recipient = normalized_recipients
+    else:
+        raise ValueError("email.recipient must be a valid email address or a list of email addresses")
 
     from_address = str(email_raw.get("from", DEFAULT_EMAIL_FROM)).strip()
     if not from_address or "@" not in from_address:

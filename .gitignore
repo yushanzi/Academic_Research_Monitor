@@ -7,6 +7,7 @@ venv/
 .venv/
 .DS_Store
 .claude/
+backups/
 
 # Working-history / ad hoc analysis docs
 PLAN.md

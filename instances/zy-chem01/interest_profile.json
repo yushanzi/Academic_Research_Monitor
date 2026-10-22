@@ -1,0 +1,30 @@
+{
+  "confirmed": true,
+  "source": "generated_from_document",
+  "fingerprint": "dd53a153f0ec95839537a78207e25d339639e058e32b7529c8fd5eeefc7e6628",
+  "versions": {
+    "prompt_version": "interest-profile-v4",
+    "schema_version": "interest-profile-schema-v3",
+    "parser_version": "interest-profile-parser-v1"
+  },
+  "profile": {
+    "core_topics": [
+      "machine-learning force fields",
+      "long-range interactions",
+      "composite polymer electrolytes",
+      "polymer electrolyte simulation",
+      "ionic transport modeling"
+    ],
+    "synonyms": [],
+    "must_have": [
+      "long-range electrostatics or long-range interaction modeling",
+      "application to composite or polymer electrolyte systems"
+    ],
+    "nice_to_have": [],
+    "exclude": [
+      "unrelated biomolecular force fields",
+      "purely generic review articles"
+    ],
+    "summary": "I am seeking literature on machine-learning force fields for composite polymer electrolytes, with emphasis on accurately; Prioritize: long-range electrostatics or long-range interaction modeling, application to composite or polymer electrolyte systems; Exclude: unrelated biomolecular force fields, purely generic review articles; Focus topics: machine-learning force fields, long-range interactions, composite polymer electrolytes, polymer electrolyte simulation, ionic transport modeling"
+  }
+}

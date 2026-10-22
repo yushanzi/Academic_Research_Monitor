@@ -1,0 +1,39 @@
+{
+  "confirmed": true,
+  "source": "assistant_revised_from_user_confirmed_suggestion",
+  "fingerprint": "7d7d041b81f9a879bbc96dcac167f466c0364b9b6e07c391c44e5d21ab1ed702",
+  "versions": {
+    "prompt_version": "interest-profile-v4",
+    "schema_version": "interest-profile-schema-v3",
+    "parser_version": "interest-profile-parser-v1"
+  },
+  "profile": {
+    "core_topics": [
+      "molecular glue degraders",
+      "molecular glues",
+      "targeted protein degradation",
+      "neosubstrate discovery",
+      "chemoproteomics",
+      "E3 ligase ligands",
+      "E3 ligase-mediated degradation"
+    ],
+    "synonyms": [
+      "molecular glue degrader",
+      "molecular glue degraders",
+      "glue degrader",
+      "neosubstrates",
+      "degrader chemoproteomics",
+      "chemoproteomic profiling",
+      "targeted protein degrader",
+      "induced protein-protein interactions",
+      "cereblon molecular glue",
+      "CRBN molecular glue",
+      "DCAF15 molecular glue",
+      "E3 ligase recruiter"
+    ],
+    "must_have": [],
+    "nice_to_have": [],
+    "exclude": [],
+    "summary": "Track literature on molecular glue degraders, molecular glues, neosubstrate discovery, chemoproteomics, targeted protein degradation, and E3 ligase-mediated degradation, including CRBN-, cereblon-, and DCAF15-related glue mechanisms."
+  }
+}
