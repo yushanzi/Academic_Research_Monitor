@@ -5,6 +5,14 @@ from access.open_access import OpenAccessDocumentAccessProvider
 from models import ensure_paper
 
 
+def _fetch_result(response=None, *, ok=True, error=""):
+    result = Mock()
+    result.ok = ok
+    result.error = error
+    result.as_response.return_value = response if ok else None
+    return result
+
+
 class AccessInfoTests(unittest.TestCase):
     def test_resolve_discovers_pdf_link_from_meta_tag(self):
         html = """
@@ -22,7 +30,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://example.com/paper"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://example.com/paper",
@@ -43,7 +51,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://example.com/paper"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://example.com/paper",
@@ -64,7 +72,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://example.com/paper"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://example.com/paper",
@@ -84,7 +92,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://arxiv.org/abs/1234.5678"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://arxiv.org/abs/1234.5678",
@@ -104,7 +112,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://www.biorxiv.org/content/10.1101/2026.01.01.123456v1"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://doi.org/10.1101/2026.01.01.123456",
@@ -127,7 +135,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://www.science.org/doi/10.1126/science.abc123"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://www.science.org/doi/10.1126/science.abc123",
@@ -160,7 +168,10 @@ class AccessInfoTests(unittest.TestCase):
         pdf_response.url = "https://example.com/content/test.full.pdf"
         pdf_response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", side_effect=[html_response, pdf_response]) as mock_get:
+        with patch(
+            "access.open_access.fetch_url_with_retries",
+            side_effect=[_fetch_result(html_response), _fetch_result(pdf_response)],
+        ) as mock_fetch:
             with patch(
                 "access.open_access.extract_text_from_pdf_bytes",
                 return_value=("word " * 500),
@@ -177,9 +188,9 @@ class AccessInfoTests(unittest.TestCase):
         self.assertEqual(access_info.evidence_level, "full_text")
         self.assertEqual(access_info.download_url, "https://example.com/content/test.full.pdf")
         mock_extract.assert_called_once_with(b"%PDF-1.4 fake")
-        self.assertEqual(mock_get.call_count, 2)
-        self.assertEqual(mock_get.call_args_list[0].args[0], "https://example.com/paper")
-        self.assertEqual(mock_get.call_args_list[1].args[0], "https://example.com/content/test.full.pdf")
+        self.assertEqual(mock_fetch.call_count, 2)
+        self.assertEqual(mock_fetch.call_args_list[0].args[0], "https://example.com/paper")
+        self.assertEqual(mock_fetch.call_args_list[1].args[0], "https://example.com/content/test.full.pdf")
 
     def test_resolve_keeps_abstract_only_when_pdf_text_is_too_short(self):
         html = """
@@ -201,7 +212,10 @@ class AccessInfoTests(unittest.TestCase):
         pdf_response.url = "https://example.com/content/test.full.pdf"
         pdf_response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", side_effect=[html_response, pdf_response]):
+        with patch(
+            "access.open_access.fetch_url_with_retries",
+            side_effect=[_fetch_result(html_response), _fetch_result(pdf_response)],
+        ):
             with patch("access.open_access.extract_text_from_pdf_bytes", return_value="too short"):
                 access_info = OpenAccessDocumentAccessProvider().resolve(
                     ensure_paper({
@@ -229,7 +243,7 @@ class AccessInfoTests(unittest.TestCase):
         html_response.url = "https://example.com/paper"
         html_response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=html_response) as mock_get:
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(html_response)) as mock_fetch:
             with patch("access.open_access.extract_text_from_pdf_bytes") as mock_extract:
                 access_info = OpenAccessDocumentAccessProvider().resolve(
                     ensure_paper({
@@ -241,7 +255,7 @@ class AccessInfoTests(unittest.TestCase):
 
         self.assertTrue(access_info.full_text_available)
         self.assertEqual(access_info.evidence_level, "full_text")
-        self.assertEqual(mock_get.call_count, 1)
+        self.assertEqual(mock_fetch.call_count, 1)
         mock_extract.assert_not_called()
 
     def test_resolve_keeps_abstract_only_when_pdf_download_fails(self):
@@ -258,8 +272,8 @@ class AccessInfoTests(unittest.TestCase):
         html_response.raise_for_status.return_value = None
 
         with patch(
-            "access.open_access.requests.get",
-            side_effect=[html_response, Exception("download failed")],
+            "access.open_access.fetch_url_with_retries",
+            side_effect=[_fetch_result(html_response), _fetch_result(None, ok=False, error="download failed")],
         ):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
@@ -288,7 +302,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://arxiv.org/abs/1234.5678"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://arxiv.org/abs/1234.5678",
@@ -315,7 +329,7 @@ class AccessInfoTests(unittest.TestCase):
         response.url = "https://www.biorxiv.org/content/10.1101/2026.01.01.123456v1"
         response.raise_for_status.return_value = None
 
-        with patch("access.open_access.requests.get", return_value=response):
+        with patch("access.open_access.fetch_url_with_retries", return_value=_fetch_result(response)):
             access_info = OpenAccessDocumentAccessProvider().resolve(
                 ensure_paper({
                     "url": "https://www.biorxiv.org/content/10.1101/2026.01.01.123456v1",

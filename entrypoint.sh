@@ -16,6 +16,7 @@ python3 - <<'PY'
 import json
 import os
 import shlex
+from schedule_utils import build_cron_with_jitter
 
 config_path = os.environ.get("CONFIG_PATH", "/app/instance/config.json")
 cron_file = os.environ.get("CRON_FILE", "/etc/cron.d/academic-monitor")
@@ -27,6 +28,7 @@ with open(config_path, "r", encoding="utf-8") as f:
 schedule = config.get("schedule") or {}
 cron = str(schedule.get("cron", "0 8 * * *")).strip()
 timezone = str(schedule.get("timezone", "Asia/Hong_Kong")).strip() or "Asia/Hong_Kong"
+random_jitter_minutes = int(schedule.get("random_jitter_minutes", 0) or 0)
 run_on_start = bool(schedule.get("run_on_start", False))
 
 parts = cron.split()
@@ -34,17 +36,16 @@ if len(parts) != 5:
     raise SystemExit("Invalid schedule.cron: expected 5 fields")
 if timezone not in {"Asia/Hong_Kong", "UTC"}:
     raise SystemExit("Invalid schedule.timezone: supported values are Asia/Hong_Kong and UTC")
+effective_cron, jitter_window_seconds = build_cron_with_jitter(cron, random_jitter_minutes)
 
 with open(cron_file, "w", encoding="utf-8") as f:
     f.write(f"CRON_TZ={timezone}\n")
-    retention_cmd = (
-        f"/usr/local/bin/python /app/retention.py --config {shlex.quote(config_path)} "
-        f"--cron-log /var/log/cron.log --skip-output"
+    run_cmd = (
+        f"/usr/local/bin/python /app/scripts/run_scheduled_job.py --config {shlex.quote(config_path)} "
+        f"--cron-log /var/log/cron.log --jitter-window-seconds {jitter_window_seconds}"
     )
-    run_cmd = f"/usr/local/bin/python run.py --config {shlex.quote(config_path)}"
     f.write(
-        f"{cron} . {shlex.quote(cron_env_file)}; cd /app && ({retention_cmd} >> /var/log/cron.log 2>&1 || true) && "
-        f"{run_cmd} >> /var/log/cron.log 2>&1\n"
+        f"{effective_cron} . {shlex.quote(cron_env_file)}; cd /app && {run_cmd} >> /var/log/cron.log 2>&1\n"
     )
 PY
 

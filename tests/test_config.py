@@ -20,10 +20,14 @@ class ConfigSchemaTests(unittest.TestCase):
             config = app_config_from_dict(_base_config(), config_path=f"{tmp}/config.json")
         self.assertEqual(config.schedule.cron, "0 8 * * *")
         self.assertEqual(config.schedule.timezone, "Asia/Hong_Kong")
+        self.assertEqual(config.schedule.random_jitter_minutes, 0)
         self.assertFalse(config.schedule.run_on_start)
         self.assertEqual(config.output_dir, "output/monitor_a")
         self.assertTrue(config.email.send_empty_notification)
         self.assertEqual(config.retention.days, 30)
+        self.assertEqual(config.scraping.default_fetch_mode, "browser_on_block")
+        self.assertEqual(config.scraping.default_retry_attempts, 3)
+        self.assertEqual(config.network.proxies, {})
         self.assertEqual(config.abstract_selection.method, "candidate_score")
         self.assertEqual(config.abstract_selection.three_llm_voting.required_votes, 2)
         self.assertEqual(len(config.abstract_selection.three_llm_voting.judges), 3)
@@ -75,6 +79,16 @@ class ConfigSchemaTests(unittest.TestCase):
                 "max_query_synonyms": 5,
             }
             payload["retention"] = {"days": 14}
+            payload["scraping"] = {
+                "default_fetch_mode": "http_client",
+                "default_timeout_seconds": 20,
+                "default_retry_attempts": 4,
+                "default_min_request_interval_seconds": 1.5,
+                "default_jitter_seconds": 0.5,
+            }
+            payload["network"] = {
+                "proxies": {"campus": "http://proxy.example.test:8080"}
+            }
             payload["candidate_scoring"] = {
                 "threshold": 0.5,
                 "fail_open": True,
@@ -90,9 +104,23 @@ class ConfigSchemaTests(unittest.TestCase):
         self.assertFalse(config.interest_profile_query.expand_synonyms)
         self.assertEqual(config.interest_profile_query.max_query_synonyms, 5)
         self.assertEqual(config.retention.days, 14)
+        self.assertEqual(config.scraping.default_fetch_mode, "http_client")
+        self.assertEqual(config.scraping.default_timeout_seconds, 20)
+        self.assertEqual(config.scraping.default_retry_attempts, 4)
+        self.assertEqual(config.scraping.default_min_request_interval_seconds, 1.5)
+        self.assertEqual(config.scraping.default_jitter_seconds, 0.5)
+        self.assertEqual(config.network.proxies["campus"], "http://proxy.example.test:8080")
         self.assertEqual(config.abstract_selection.method, "candidate_score")
         self.assertEqual(config.candidate_scoring.threshold, 0.5)
         self.assertTrue(config.candidate_scoring.fail_open)
+
+    def test_invalid_scraping_fetch_mode_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["scraping"] = {"default_fetch_mode": "surprise"}
+            with self.assertRaises(ValueError) as exc:
+                app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertIn("scraping.default_fetch_mode", str(exc.exception))
 
     def test_invalid_retention_days_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -183,6 +211,43 @@ class ConfigSchemaTests(unittest.TestCase):
             payload["schedule"] = {"timezone": "Europe/London"}
             with self.assertRaises(ValueError):
                 app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+
+    def test_random_schedule_jitter_is_parsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["schedule"] = {"random_jitter_minutes": 60}
+            config = app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertEqual(config.schedule.random_jitter_minutes, 60)
+
+    def test_random_schedule_jitter_requires_fixed_daily_cron(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["schedule"] = {
+                "cron": "0 8 * * 1",
+                "random_jitter_minutes": 60,
+            }
+            with self.assertRaises(ValueError) as exc:
+                app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertIn("requires schedule.cron to be a fixed daily time", str(exc.exception))
+
+    def test_random_schedule_jitter_must_stay_within_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["schedule"] = {
+                "cron": "15 0 * * *",
+                "random_jitter_minutes": 60,
+            }
+            with self.assertRaises(ValueError) as exc:
+                app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertIn("must keep the randomized window within the same calendar day", str(exc.exception))
+
+    def test_random_schedule_jitter_rejects_boolean_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = _base_config()
+            payload["schedule"] = {"random_jitter_minutes": True}
+            with self.assertRaises(ValueError) as exc:
+                app_config_from_dict(payload, config_path=f"{tmp}/config.json")
+        self.assertIn("schedule.random_jitter_minutes must be a non-negative integer", str(exc.exception))
 
     def test_authenticated_access_mode_fails_until_implemented(self):
         with tempfile.TemporaryDirectory() as tmp:

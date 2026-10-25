@@ -3,40 +3,16 @@ from __future__ import annotations
 import logging
 from urllib.parse import urljoin
 
-from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 from .base import DocumentAccessProvider
 from .pdf_extract import extract_text_from_pdf_bytes
 from models import AccessInfo, Paper
+from sources.base import BROWSER_HEADERS, fetch_url_with_retries
 
 logger = logging.getLogger(__name__)
 
-# Unified browser-mimicking headers (imported from base for the fallback path)
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-        "image/avif,image/webp,image/apng,*/*;q=0.8"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Ch-Ua": (
-        '"Chromium";v="124", "Google Chrome";v="124", "Not?A_Brand";v="99"'
-    ),
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"macOS"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-}
-
-IMPERSONATE = "chrome124"
+HEADERS = BROWSER_HEADERS
 
 GENERIC_FULL_TEXT_SELECTORS = (
     "article",
@@ -108,9 +84,20 @@ SOURCE_RULES = {
 
 
 class OpenAccessDocumentAccessProvider(DocumentAccessProvider):
+    def __init__(self, source_settings: dict[str, dict] | None = None, network=None):
+        self._source_settings = source_settings or {}
+        if isinstance(network, dict):
+            self._network = dict(network.get("proxies", {}) or {})
+        else:
+            self._network = dict(getattr(network, "proxies", {}) or {})
+
     def resolve(self, paper: Paper) -> AccessInfo:
         source_key = _source_key(paper)
         rules = SOURCE_RULES.get(source_key, {})
+        source_settings = self._source_settings.get(source_key, {}) or {}
+        proxy_url = _proxy_url_for_source(source_settings, self._network)
+        browser_storage_state = str(source_settings.get("browser_storage_state", "")).strip() or None
+        fetch_mode = str(source_settings.get("fetch_mode", "browser_on_block")).strip() or "browser_on_block"
 
         doi_url = _doi_url(paper.doi)
         landing_page_url = paper.landing_page_url or paper.url or doi_url
@@ -124,9 +111,19 @@ class OpenAccessDocumentAccessProvider(DocumentAccessProvider):
 
         fetched_response = None
         if landing_page_url:
-            fetched_response = _safe_get(landing_page_url)
+            fetched_response = _safe_get(
+                landing_page_url,
+                proxy_url=proxy_url,
+                browser_storage_state=browser_storage_state,
+                fetch_mode=fetch_mode,
+            )
         if not fetched_response and doi_url and doi_url != landing_page_url:
-            fetched_response = _safe_get(doi_url)
+            fetched_response = _safe_get(
+                doi_url,
+                proxy_url=proxy_url,
+                browser_storage_state=browser_storage_state,
+                fetch_mode=fetch_mode,
+            )
             if fetched_response:
                 landing_page_url = fetched_response.url
                 entry_url = entry_url or landing_page_url
@@ -151,7 +148,13 @@ class OpenAccessDocumentAccessProvider(DocumentAccessProvider):
                 open_access = True
 
         if not full_text_available and download_url:
-            extracted_text = _extract_full_text_from_pdf(download_url, paper, rules)
+            extracted_text = _extract_full_text_from_pdf(
+                download_url,
+                paper,
+                rules,
+                proxy_url=proxy_url,
+                browser_storage_state=browser_storage_state,
+            )
             if extracted_text:
                 full_text = extracted_text
                 full_text_available = True
@@ -198,107 +201,38 @@ def _doi_url(doi: str) -> str:
     return f"https://doi.org/{doi}" if doi else ""
 
 
-# ---------------------------------------------------------------------------
-# HTTP helpers — curl_cffi with browser impersonation, Playwright fallback
-# ---------------------------------------------------------------------------
-
-
-def _curl_fetch(url: str) -> requests.Response | None:
-    """Fetch via curl_cffi with browser TLS fingerprint."""
-    try:
-        resp = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
-            impersonate=IMPERSONATE,
-            allow_redirects=True,
-        )
-        resp.raise_for_status()
-        return resp
-    except Exception as exc:
-        logger.debug("curl_cffi fetch failed for %s: %s", url, exc)
+def _proxy_url_for_source(source_settings: dict, proxies) -> str | None:
+    proxy_profile = str(source_settings.get("proxy_profile", "")).strip()
+    if not proxy_profile:
         return None
+    if isinstance(proxies, dict):
+        proxy_url = str(proxies.get(proxy_profile, "")).strip()
+        return proxy_url or None
+    return None
 
 
-def _is_cloudflare_block(response) -> bool:
-    """Detect Cloudflare challenge / block page."""
-    if response is None:
-        return False
-    status = getattr(response, "status_code", 0)
-    if status not in (403, 503):
-        return False
-    text = (getattr(response, "text", "") or "").lower()
-    markers = (
-        "cf-browser-verification", "cf-challenge", "cloudflare",
-        "checking your browser", "just a moment", "turnstile",
+def _safe_get(
+    url: str,
+    *,
+    proxy_url: str | None = None,
+    browser_storage_state: str | None = None,
+    fetch_mode: str = "browser_on_block",
+):
+    result = fetch_url_with_retries(
+        url,
+        headers=HEADERS,
+        timeout=20,
+        context="open-access fetch",
+        fetch_mode=fetch_mode,
+        proxy_url=proxy_url,
+        browser_storage_state=browser_storage_state,
+        allow_browser=True,
+        expect_html=not str(url or "").lower().endswith(".pdf"),
     )
-    if any(m in text for m in markers):
-        return True
-    headers_lower = {k.lower(): v.lower() for k, v in (getattr(response, "headers", {}) or {}).items()}
-    if headers_lower.get("server") == "cloudflare":
-        return True
-    if headers_lower.get("cf-ray"):
-        return True
-    return False
-
-
-def _playwright_fetch(url: str, timeout_ms: int = 20000) -> str | None:
-    """Fetch page HTML via headless Chromium (handles Cloudflare challenges)."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.warning("Playwright not installed; browser fallback unavailable")
+    if not result.ok:
+        logger.debug("Failed to fetch access candidate %s: %s", url, result.error or "blocked")
         return None
-
-    try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=HEADERS["User-Agent"],
-            )
-            page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            page.wait_for_timeout(3000)  # Allow Cloudflare challenge to complete
-            html = page.content()
-            browser.close()
-            return html
-    except Exception as exc:
-        logger.debug("Playwright fetch failed for %s: %s", url, exc)
-        return None
-
-
-class _BrowserResponse:
-    """Minimal response-like object wrapping browser-fetched HTML."""
-
-    def __init__(self, text: str, url: str, status_code: int = 200):
-        self.text = text
-        self.content = text.encode("utf-8")
-        self.url = url
-        self.status_code = status_code
-        self.headers = {}
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise Exception(f"Browser fetch HTTP {self.status_code}")
-
-
-def _safe_get(url: str):
-    """Fetch *url*, falling back from curl_cffi → headless browser."""
-    # Try curl_cffi first (fast, lightweight)
-    response = _curl_fetch(url)
-    if response is not None and not _is_cloudflare_block(response):
-        return response
-
-    if response is not None and _is_cloudflare_block(response):
-        logger.info("Cloudflare block detected for %s; switching to headless browser", url)
-
-    # Fall back to headless browser
-    html = _playwright_fetch(url)
-    if html is None:
-        logger.debug("Failed to fetch access candidate %s (all methods exhausted)", url)
-        return None
-
-    return _BrowserResponse(html, url)
+    return result.as_response()
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +240,20 @@ def _safe_get(url: str):
 # ---------------------------------------------------------------------------
 
 
-def _extract_full_text_from_pdf(download_url: str, paper: Paper, rules: dict) -> str:
-    response = _safe_get(download_url)
+def _extract_full_text_from_pdf(
+    download_url: str,
+    paper: Paper,
+    rules: dict,
+    *,
+    proxy_url: str | None = None,
+    browser_storage_state: str | None = None,
+) -> str:
+    response = _safe_get(
+        download_url,
+        proxy_url=proxy_url,
+        browser_storage_state=browser_storage_state,
+        fetch_mode="http_client",
+    )
     if not response:
         return ""
     if not _is_pdf_response(response, download_url):

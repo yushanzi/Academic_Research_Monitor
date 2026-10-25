@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import base64
 import logging
@@ -40,11 +42,58 @@ def _response_id(response) -> str:
     return "unknown"
 
 
+def _source_warning_items(run_stats: dict | None) -> list[str]:
+    diagnostics = (run_stats or {}).get("source_diagnostics") or {}
+    warning_items: list[str] = []
+
+    for source_name, source_stats in diagnostics.items():
+        if not isinstance(source_stats, dict):
+            continue
+        phase_messages = []
+        for phase, phase_stats in source_stats.items():
+            if not isinstance(phase_stats, dict):
+                continue
+            blocked = int(phase_stats.get("blocked", 0) or 0)
+            rate_limited = int(phase_stats.get("rate_limited", 0) or 0)
+            failures = int(phase_stats.get("failures", 0) or 0)
+            last_status = str(phase_stats.get("last_status", "") or "")
+            if blocked <= 0 and rate_limited <= 0 and failures <= 0:
+                continue
+
+            details = []
+            if blocked > 0:
+                details.append(f"blocked {blocked}")
+            if rate_limited > 0:
+                details.append(f"rate_limited {rate_limited}")
+            if failures > 0:
+                details.append(f"failed {failures}")
+            if last_status and last_status != "ok":
+                details.append(f"last={last_status}")
+            phase_messages.append(f"{phase}: {', '.join(details)}")
+
+        if phase_messages:
+            warning_items.append(f"{source_name} - {'; '.join(phase_messages)}")
+
+    return warning_items
+
+
+def _source_warning_html(run_stats: dict | None) -> str:
+    warning_items = _source_warning_items(run_stats)
+    if not warning_items:
+        return ""
+    items_html = "".join(f"<li>{item}</li>" for item in warning_items)
+    return (
+        "<p><strong>抓取告警：</strong>本轮有部分数据源出现访问异常或被限制。</p>"
+        f"<ul>{items_html}</ul>"
+    )
+
+
 def send_report(
     pdf_path: str,
     paper_count: int,
     config: dict,
     date_str: str,
+    run_stats: dict | None = None,
 ) -> None:
     api_key = os.environ.get("RESEND_API_KEY", "")
     if not api_key:
@@ -60,6 +109,7 @@ def send_report(
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
     monitor_name = config.get("user", {}).get("name", "academic-monitor")
     topics_str = _topics_text(config)
+    warning_html = _source_warning_html(run_stats)
 
     with open(pdf_path, "rb") as f:
         pdf_data = f.read()
@@ -76,6 +126,7 @@ def send_report(
             f"<p><strong>{monitor_name}</strong> 本轮学术研究监控已完成。</p>"
             f"<p><strong>监控主题：</strong>{topics_str}</p>"
             f"<p><strong>高相关论文数量：</strong>{paper_count}</p>"
+            f"{warning_html}"
             f"<p>详细分析请见附件 PDF 报告。</p>"
             f"<p>—— 学术研究监控系统</p>"
         ),
@@ -91,7 +142,13 @@ def send_report(
     logger.info("Email sent successfully, id: %s", _response_id(response))
 
 
-def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_candidates") -> None:
+def send_empty_notification(
+    config: dict,
+    date_str: str,
+    *,
+    reason: str = "no_candidates",
+    run_stats: dict | None = None,
+) -> None:
     api_key = os.environ.get("RESEND_API_KEY", "")
     if not api_key:
         logger.warning("No RESEND_API_KEY, skipping empty notification")
@@ -106,6 +163,7 @@ def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_ca
     sender = email_cfg.get("from", DEFAULT_EMAIL_FROM)
     monitor_name = config.get("user", {}).get("name", "academic-monitor")
     topics_str = _topics_text(config)
+    warning_html = _source_warning_html(run_stats)
 
     if reason == "no_relevant":
         message = "今日发现候选论文，但没有通过高相关性筛选。"
@@ -122,6 +180,7 @@ def send_empty_notification(config: dict, date_str: str, *, reason: str = "no_ca
             f"<p>您好，</p>"
             f"<p>{message}</p>"
             f"<p><strong>监控主题：</strong>{topics_str}</p>"
+            f"{warning_html}"
             f"<p>—— 学术研究监控系统</p>"
         ),
     }

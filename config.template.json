@@ -5,6 +5,7 @@
   "schedule": {
     "cron": "0 8 * * *",
     "timezone": "Asia/Hong_Kong",
+    "random_jitter_minutes": 0,
     "run_on_start": true
   },
   "sources": {
@@ -52,6 +53,16 @@
   },
   "retention": {
     "days": 30
+  },
+  "scraping": {
+    "default_fetch_mode": "browser_on_block",
+    "default_timeout_seconds": 15,
+    "default_retry_attempts": 3,
+    "default_min_request_interval_seconds": 0.0,
+    "default_jitter_seconds": 0.0
+  },
+  "network": {
+    "proxies": {}
   },
   "content_analysis": {},
   "email": {

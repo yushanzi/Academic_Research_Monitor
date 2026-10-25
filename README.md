@@ -28,6 +28,7 @@ Create one config per monitor under `instances/`, or copy `config.template.json`
 - `user.name`: instance name
 - `schedule.cron`: cron expression
 - `schedule.timezone`: defaults to `Asia/Hong_Kong`; supported values are `Asia/Hong_Kong` and `UTC`
+- `schedule.random_jitter_minutes`: optional randomization window around the scheduled time; only supported for fixed daily cron values such as `0 8 * * *`
 - `schedule.run_on_start`: whether to run once at container startup
 - `sources`: enable/disable data sources
   - ACS journal codes supported out of the box include `jmcmar`, `jacsat`, and `jctcce`
@@ -49,8 +50,14 @@ Create one config per monitor under `instances/`, or copy `config.template.json`
 - `email.recipient`: destination email address
 - `email.from`: sender string
 - `email.send_empty_notification`: whether to send a no-result email when no papers are selected; defaults to `true`
-- `output_dir`: report/cache output directory for reports and runtime artifacts; keep this under the repo-level `output/` tree (for example `output/chem-monitor`), not under `instances/`
+- `output_dir`: report/cache output directory for reports and runtime artifacts; keep this under the repo-level `output/` tree (for example `output/drug-design`), not under `instances/`
 - `retention.days`: retention window for `/var/log/cron.log` and dated runtime artifacts in `output_dir`; defaults to `30`
+- `scraping.default_fetch_mode`: default source fetch policy: `http_client`, `browser_on_block`, or `browser_first`
+- `scraping.default_timeout_seconds`: per-request timeout used by publisher source fetching
+- `scraping.default_retry_attempts`: retry budget for publisher fetches
+- `scraping.default_min_request_interval_seconds`: default per-source minimum interval between publisher requests
+- `scraping.default_jitter_seconds`: optional random delay added on top of the minimum interval
+- `network.proxies`: named proxy profiles that sources can reference with `sources.<name>.proxy_profile`
 - `access.mode`: must be `open_access` in the current implementation (`authenticated` not implemented yet)
 
 Runtime interest semantics live only in the sibling `instances/<instance>/interest_profile.json` file:
@@ -167,7 +174,7 @@ Then use the generated Compose file:
 docker compose -f docker-compose.multi-instance.yml up -d bio-monitor
 ```
 
-At container startup, each container reads its mounted `/app/instance/config.json`, generates the cron entry dynamically, optionally runs one immediate job when `schedule.run_on_start=true`, and then starts cron.
+At container startup, each container reads its mounted `/app/instance/config.json`, generates the cron entry dynamically, optionally runs one immediate job when `schedule.run_on_start=true`, and then starts cron. When `schedule.random_jitter_minutes > 0`, the container schedules the earliest time in that window and applies a random delay before the actual run.
 
 On Windows, open Docker Desktop first and run the commands from PowerShell, Windows Terminal, or a WSL shell.
 
@@ -176,7 +183,7 @@ On Windows, open Docker Desktop first and run the commands from PowerShell, Wind
 Sample per-instance configs are included in `instances/`:
 
 - `instances/bio-monitor/config.json`
-- `instances/chem-monitor/config.json`
+- `instances/drug-design/config.json`
 
 Run both monitors in parallel:
 

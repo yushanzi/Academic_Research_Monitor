@@ -20,6 +20,7 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertEqual(template["llm"]["base_url"], "https://api.poe.com/v1")
         self.assertEqual(template["email"]["from"], "Academic Monitor <noreply@innoscreen.ai>")
         self.assertEqual(template["retention"]["days"], 30)
+        self.assertEqual(template["schedule"]["random_jitter_minutes"], 0)
         self.assertEqual(template["abstract_selection"]["method"], "candidate_score")
         self.assertEqual(
             [judge["model"] for judge in template["abstract_selection"]["three_llm_voting"]["judges"]],
@@ -33,7 +34,7 @@ class ExampleConfigTests(unittest.TestCase):
 
     def test_onboarding_interest_documents_exist(self):
         self.assertTrue(os.path.exists("instances/bio-monitor.txt"))
-        self.assertTrue(os.path.exists("instances/chem-monitor.txt"))
+        self.assertTrue(os.path.exists("instances/drug-design.txt"))
 
     def test_runtime_instance_configs_load_if_present(self):
         specs = discover_instance_specs("instances")

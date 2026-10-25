@@ -297,6 +297,12 @@ class ReportTests(unittest.TestCase):
         result = self.report._format_schedule_display({"cron": "0 8 * * *", "timezone": "Asia/Hong_Kong"})
         self.assertEqual(result, "每天 8:00 AM（Asia/Hong_Kong）")
 
+    def test_format_schedule_display_daily_morning_with_jitter(self):
+        result = self.report._format_schedule_display(
+            {"cron": "0 8 * * *", "timezone": "Asia/Hong_Kong", "random_jitter_minutes": 60}
+        )
+        self.assertEqual(result, "每天 8:00 AM（Asia/Hong_Kong，随机 ±60 分钟）")
+
     def test_format_schedule_display_daily_evening_with_minutes(self):
         result = self.report._format_schedule_display({"cron": "30 20 * * *", "timezone": "UTC"})
         self.assertEqual(result, "每天 8:30 PM（UTC）")

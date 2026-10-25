@@ -101,3 +101,68 @@ class MailerTests(unittest.TestCase):
 
         params = mock_send.call_args.args[0]
         self.assertEqual(params["to"], ["user@example.com", "other@example.com"])
+
+    def test_send_report_includes_source_warnings_when_present(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"%PDF-1.4 test")
+            pdf_path = tmp.name
+
+        config = {
+            "user": {"name": "monitor-a"},
+            "interest_profile": {"core_topics": ["protein folding"]},
+            "email": {"recipient": "user@example.com", "from": "Monitor <sender@example.com>"},
+        }
+        run_stats = {
+            "source_diagnostics": {
+                "Nature": {
+                    "discovery": {"blocked": 2, "rate_limited": 1, "failures": 0, "last_status": "rate_limited"},
+                    "metadata": {"blocked": 0, "rate_limited": 0, "failures": 0, "last_status": "not_started"},
+                }
+            }
+        }
+
+        try:
+            with patch.dict(os.environ, {"RESEND_API_KEY": "re_test"}, clear=False):
+                with patch.object(
+                    self.mailer.resend.Emails,
+                    "send",
+                    return_value={"id": "email_123"},
+                ) as mock_send:
+                    self.mailer.send_report(pdf_path, 2, config, "2026-03-30", run_stats=run_stats)
+        finally:
+            os.remove(pdf_path)
+
+        params = mock_send.call_args.args[0]
+        self.assertIn("抓取告警", params["html"])
+        self.assertIn("Nature - discovery: blocked 2, rate_limited 1, last=rate_limited", params["html"])
+
+    def test_send_empty_notification_includes_source_warnings_when_present(self):
+        config = {
+            "user": {"name": "monitor-a"},
+            "interest_profile": {"core_topics": ["protein folding"]},
+            "email": {"recipient": "user@example.com", "from": "Monitor <sender@example.com>"},
+        }
+        run_stats = {
+            "source_diagnostics": {
+                "Science": {
+                    "discovery": {"blocked": 0, "rate_limited": 0, "failures": 2, "last_status": "failed"},
+                }
+            }
+        }
+
+        with patch.dict(os.environ, {"RESEND_API_KEY": "re_test"}, clear=False):
+            with patch.object(
+                self.mailer.resend.Emails,
+                "send",
+                return_value={"id": "email_123"},
+            ) as mock_send:
+                self.mailer.send_empty_notification(
+                    config,
+                    "2026-03-30",
+                    reason="no_candidates",
+                    run_stats=run_stats,
+                )
+
+        params = mock_send.call_args.args[0]
+        self.assertIn("抓取告警", params["html"])
+        self.assertIn("Science - discovery: failed 2, last=failed", params["html"])

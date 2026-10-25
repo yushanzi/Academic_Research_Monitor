@@ -20,6 +20,7 @@ class UserConfig:
 class ScheduleConfig:
     cron: str = "0 8 * * *"
     timezone: str = "Asia/Hong_Kong"
+    random_jitter_minutes: int = 0
     run_on_start: bool = False
 
 
@@ -55,6 +56,20 @@ class RetentionConfig:
 
 
 @dataclass
+class ScrapingConfig:
+    default_fetch_mode: str = "browser_on_block"
+    default_timeout_seconds: int = 15
+    default_retry_attempts: int = 3
+    default_min_request_interval_seconds: float = 0.0
+    default_jitter_seconds: float = 0.0
+
+
+@dataclass
+class NetworkConfig:
+    proxies: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     user: UserConfig
     schedule: ScheduleConfig
@@ -66,6 +81,8 @@ class AppConfig:
     access: AccessConfig = field(default_factory=AccessConfig)
     interest_profile_query: InterestProfileQueryConfig = field(default_factory=InterestProfileQueryConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    scraping: ScrapingConfig = field(default_factory=ScrapingConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     content_analysis: ContentAnalysisConfig = field(default_factory=ContentAnalysisConfig)
     abstract_selection: AbstractSelectionConfig = field(default_factory=AbstractSelectionConfig)
     candidate_scoring: CandidateScoringConfig = field(default_factory=CandidateScoringConfig)

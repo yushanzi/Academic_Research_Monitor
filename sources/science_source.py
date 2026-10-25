@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import time
 from datetime import datetime, timezone
@@ -6,7 +8,7 @@ import feedparser
 from bs4 import BeautifulSoup
 
 from models import Paper
-from .base import PaperSource, build_paper, matches_topics, scrape_html_with_retries
+from .base import PublisherSource, build_paper, matches_topics
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +18,18 @@ SCIENCE_RSS_BY_JOURNAL = {
     "sciimmunol": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciimmunol",
     "scirobotics": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=scirobotics",
 }
-HEADERS = {
-    "User-Agent": "AcademicResearchMonitor/1.0 (+local deployment)"
-}
 SCRAPE_BUDGET_SECONDS = 45
 
 
-class ScienceSource(PaperSource):
+class ScienceSource(PublisherSource):
     name = "Science"
 
-    def __init__(self, journals: list[str] | None = None):
+    def __init__(
+        self,
+        journals: list[str] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
         self.journals = journals or ["science"]
 
     def fetch_papers(self, topics: list[str], hours: int) -> list[Paper]:
@@ -40,7 +44,17 @@ class ScienceSource(PaperSource):
                 continue
 
             try:
-                feed = feedparser.parse(feed_url)
+                feed_response = self._fetch_phase(
+                    feed_url,
+                    phase="discovery",
+                    allow_browser=False,
+                    expect_html=False,
+                    deadline_monotonic=deadline_monotonic,
+                    context=f"Science feed fetch ({journal})",
+                )
+                if not feed_response:
+                    continue
+                feed = feedparser.parse(feed_response.text)
                 batch = []
                 for entry in feed.entries:
                     published = None
@@ -58,7 +72,11 @@ class ScienceSource(PaperSource):
                     if not matches_topics(f"{title} {description}", topics):
                         continue
 
-                    abstract = self._scrape_abstract(link, deadline_monotonic) if link else description
+                    abstract = description
+                    if link and not self.feed_only:
+                        scraped_abstract = self._scrape_abstract(link, deadline_monotonic)
+                        if scraped_abstract:
+                            abstract = scraped_abstract
                     if not abstract:
                         abstract = description
 
@@ -94,9 +112,9 @@ class ScienceSource(PaperSource):
     def _scrape_abstract(self, url: str, deadline_monotonic: float) -> str:
         """Scrape abstract from Science article page."""
         try:
-            resp = scrape_html_with_retries(
+            resp = self._fetch_phase(
                 url,
-                headers=HEADERS,
+                phase="metadata",
                 deadline_monotonic=deadline_monotonic,
                 context="Science abstract scrape",
             )

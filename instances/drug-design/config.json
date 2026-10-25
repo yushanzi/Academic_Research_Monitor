@@ -5,6 +5,7 @@
   "schedule": {
     "cron": "0 8 * * *",
     "timezone": "Asia/Hong_Kong",
+    "random_jitter_minutes": 60,
     "run_on_start": true
   },
   "sources": {
@@ -32,7 +33,7 @@
       ]
     },
     "acs": {
-      "enabled": true,
+      "enabled": false,
       "journals": [
         "jmcmar",
         "jacsat",

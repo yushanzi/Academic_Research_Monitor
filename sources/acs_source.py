@@ -8,7 +8,7 @@ import feedparser
 from bs4 import BeautifulSoup
 
 from models import Paper
-from .base import PaperSource, build_paper, matches_topics, scrape_html_with_retries
+from .base import PublisherSource, build_paper, matches_topics
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +32,18 @@ ACS_FEEDS = {
     },
 }
 
-HEADERS = {
-    "User-Agent": "AcademicResearchMonitor/1.0 (+local deployment)"
-}
 SCRAPE_BUDGET_SECONDS = 45
 
 
-class ACSSource(PaperSource):
+class ACSSource(PublisherSource):
     name = "ACS Publications"
 
-    def __init__(self, journals: list[str] | None = None):
+    def __init__(
+        self,
+        journals: list[str] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
         self.journals = journals or ["jmcmar", "jacsat", "jctcce"]
 
     def fetch_papers(self, topics: list[str], hours: int) -> list[Paper]:
@@ -77,7 +79,17 @@ class ACSSource(PaperSource):
         cutoff: datetime,
         deadline_monotonic: float,
     ) -> list[Paper]:
-        feed = feedparser.parse(feed_url)
+        feed_response = self._fetch_phase(
+            feed_url,
+            phase="discovery",
+            allow_browser=False,
+            expect_html=False,
+            deadline_monotonic=deadline_monotonic,
+            context=f"ACS feed fetch ({journal_name})",
+        )
+        if not feed_response:
+            return []
+        feed = feedparser.parse(feed_response.text)
         papers = []
 
         for entry in feed.entries:
@@ -96,7 +108,11 @@ class ACSSource(PaperSource):
             if not matches_topics(f"{title} {description}", topics):
                 continue
 
-            abstract = self._scrape_abstract(link, deadline_monotonic) if link else description
+            abstract = description
+            if link and not self.feed_only:
+                scraped_abstract = self._scrape_abstract(link, deadline_monotonic)
+                if scraped_abstract:
+                    abstract = scraped_abstract
             if not abstract:
                 abstract = description
 
@@ -127,9 +143,9 @@ class ACSSource(PaperSource):
     def _scrape_abstract(self, url: str, deadline_monotonic: float) -> str:
         """Scrape abstract from ACS article page."""
         try:
-            resp = scrape_html_with_retries(
+            resp = self._fetch_phase(
                 url,
-                headers=HEADERS,
+                phase="metadata",
                 deadline_monotonic=deadline_monotonic,
                 context="ACS abstract scrape",
             )

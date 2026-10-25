@@ -5,7 +5,10 @@ import random
 import re
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
 
 from curl_cffi import requests
 from curl_cffi.requests.errors import RequestsError
@@ -49,9 +52,11 @@ BROWSER_HEADERS = {
 # ---------------------------------------------------------------------------
 SCRAPE_TIMEOUT_SECONDS = 15
 SCRAPE_MAX_ATTEMPTS = 3
+SCRAPE_DEFAULT_FETCH_MODE = "browser_on_block"
 SCRAPE_RETRYABLE_STATUS_CODES = {403, 429, 500, 502, 503, 504}
 SCRAPE_BACKOFF_BASE_SECONDS = 1.0
 SCRAPE_BACKOFF_JITTER_SECONDS = 0.25
+SUPPORTED_FETCH_MODES = {"http_client", "browser_on_block", "browser_first"}
 
 TOPIC_STOPWORDS = {
     "a",
@@ -128,6 +133,156 @@ class PaperSource(ABC):
 
     def _cutoff_time(self, hours: int) -> datetime:
         return datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+@dataclass
+class FetchResult:
+    ok: bool
+    url: str
+    status_code: int | None = None
+    text: str = ""
+    content: bytes = b""
+    headers: dict[str, str] = field(default_factory=dict)
+    method: str = "http_client"
+    blocked: bool = False
+    rate_limited: bool = False
+    error: str = ""
+    challenge_detected: bool = False
+    used_browser_fallback: bool = False
+
+    def as_response(self):
+        if not self.ok:
+            return None
+        return _FetchedResponse(self)
+
+
+class PublisherSource(PaperSource):
+    """Common fetch/runtime policy for publisher-backed RSS + article sources."""
+
+    def __init__(
+        self,
+        *,
+        fetch_mode: str | None = None,
+        proxy_profile: str | None = None,
+        browser_storage_state: str | None = None,
+        min_request_interval_seconds: float | int | None = None,
+        jitter_seconds: float | int | None = None,
+        feed_only: bool = False,
+        scraping: Any | None = None,
+        network: Any | None = None,
+    ):
+        scraping_defaults = _config_to_dict(scraping)
+        network_defaults = _config_to_dict(network)
+        self.fetch_mode = _normalize_fetch_mode(
+            fetch_mode or scraping_defaults.get("default_fetch_mode", SCRAPE_DEFAULT_FETCH_MODE)
+        )
+        self.proxy_profile = (proxy_profile or "").strip() or None
+        self.browser_storage_state = (browser_storage_state or "").strip() or None
+        self.min_request_interval_seconds = float(
+            min_request_interval_seconds
+            if min_request_interval_seconds is not None
+            else scraping_defaults.get("default_min_request_interval_seconds", 0.0)
+        )
+        self.jitter_seconds = float(
+            jitter_seconds if jitter_seconds is not None else scraping_defaults.get("default_jitter_seconds", 0.0)
+        )
+        self.feed_only = bool(feed_only)
+        self.scraping_defaults = scraping_defaults
+        self.network_defaults = network_defaults
+        self._last_request_monotonic: float | None = None
+        self._diagnostics = {
+            phase: {
+                "requests": 0,
+                "successes": 0,
+                "blocked": 0,
+                "rate_limited": 0,
+                "failures": 0,
+                "fallbacks": 0,
+                "http_status_counts": {},
+                "last_status": "not_started",
+            }
+            for phase in ("discovery", "metadata", "document")
+        }
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        return _deep_copy_dict(self._diagnostics)
+
+    def _resolve_proxy_url(self) -> str | None:
+        proxies = self.network_defaults.get("proxies") or {}
+        if not self.proxy_profile:
+            return None
+        proxy_url = str(proxies.get(self.proxy_profile, "")).strip()
+        if proxy_url:
+            return proxy_url
+        logger.warning("%s: proxy profile '%s' is not defined", self.name, self.proxy_profile)
+        return None
+
+    def _throttle(self) -> None:
+        min_interval = max(0.0, self.min_request_interval_seconds)
+        if min_interval <= 0:
+            return
+        now = time.monotonic()
+        if self._last_request_monotonic is not None:
+            wait_seconds = min_interval - (now - self._last_request_monotonic)
+            if self.jitter_seconds > 0:
+                wait_seconds += random.uniform(0.0, self.jitter_seconds)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+        self._last_request_monotonic = time.monotonic()
+
+    def _record_fetch_result(self, phase: str, result: FetchResult) -> None:
+        phase_stats = self._diagnostics[phase]
+        phase_stats["requests"] += 1
+        if result.status_code is not None:
+            counts = phase_stats["http_status_counts"]
+            key = str(result.status_code)
+            counts[key] = counts.get(key, 0) + 1
+        if result.used_browser_fallback:
+            phase_stats["fallbacks"] += 1
+        if result.ok:
+            phase_stats["successes"] += 1
+            phase_stats["last_status"] = "ok"
+            return
+        if result.rate_limited:
+            phase_stats["rate_limited"] += 1
+            phase_stats["last_status"] = "rate_limited"
+            return
+        if result.blocked:
+            phase_stats["blocked"] += 1
+            phase_stats["last_status"] = "blocked"
+            return
+        phase_stats["failures"] += 1
+        phase_stats["last_status"] = "failed"
+
+    def _fetch_phase(
+        self,
+        url: str,
+        *,
+        phase: str,
+        headers: dict[str, str] | None = None,
+        timeout: int | None = None,
+        deadline_monotonic: float | None = None,
+        fetch_mode: str | None = None,
+        allow_browser: bool = True,
+        expect_html: bool = True,
+        context: str,
+    ):
+        self._throttle()
+        result = fetch_url_with_retries(
+            url,
+            headers=headers,
+            timeout=timeout or int(self.scraping_defaults.get("default_timeout_seconds", SCRAPE_TIMEOUT_SECONDS)),
+            max_attempts=int(self.scraping_defaults.get("default_retry_attempts", SCRAPE_MAX_ATTEMPTS)),
+            deadline_monotonic=deadline_monotonic,
+            context=context,
+            fetch_mode=_normalize_fetch_mode(fetch_mode or self.fetch_mode),
+            proxy_url=self._resolve_proxy_url(),
+            browser_storage_state=self.browser_storage_state,
+            allow_browser=allow_browser,
+            expect_html=expect_html,
+        )
+        self._record_fetch_result(phase, result)
+        return result.as_response()
 
 
 # ---------------------------------------------------------------------------
@@ -231,55 +386,147 @@ def matches_interest_profile(text: str, profile: InterestProfile) -> tuple[bool,
 # ---------------------------------------------------------------------------
 
 
+class _FetchedResponse:
+    def __init__(self, result: FetchResult):
+        self.text = result.text
+        self.content = result.content
+        self.url = result.url
+        self.status_code = result.status_code or 200
+        self.headers = result.headers
+        self.fetch_result = result
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RequestsError(f"HTTP {self.status_code}")
+
+
+def _config_to_dict(value: Any | None) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    return {
+        key: getattr(value, key)
+        for key in dir(value)
+        if not key.startswith("_") and not callable(getattr(value, key))
+    }
+
+
+def _deep_copy_dict(value: dict[str, Any]) -> dict[str, Any]:
+    cloned: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            cloned[key] = _deep_copy_dict(item)
+        else:
+            cloned[key] = item
+    return cloned
+
+
+def _normalize_fetch_mode(fetch_mode: str) -> str:
+    normalized = str(fetch_mode or SCRAPE_DEFAULT_FETCH_MODE).strip() or SCRAPE_DEFAULT_FETCH_MODE
+    if normalized not in SUPPORTED_FETCH_MODES:
+        raise ValueError(f"Unsupported fetch_mode: {normalized}")
+    return normalized
+
+
+def _browser_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
+    merged = dict(BROWSER_HEADERS)
+    if headers:
+        merged.update(headers)
+    return merged
+
+
+def _looks_like_block_page(text: str) -> bool:
+    body = (text or "").lower()
+    if not body:
+        return False
+    return any(marker in body for marker in CLOUDFLARE_MARKERS)
+
+
+def is_blocked_response(response) -> bool:
+    if response is None:
+        return False
+    status = getattr(response, "status_code", 0) or 0
+    if status in (403, 429, 503):
+        return True
+    return _looks_like_block_page(getattr(response, "text", "") or "")
+
+
 def _curl_get(
     url: str,
     *,
     headers: dict[str, str] | None = None,
     timeout: int = SCRAPE_TIMEOUT_SECONDS,
     impersonate: str = IMPERSONATE,
+    proxy_url: str | None = None,
 ):
     """Thin wrapper around curl_cffi.requests.get with browser impersonation."""
     return requests.get(
         url,
-        headers=headers or BROWSER_HEADERS,
+        headers=_browser_headers(headers),
         timeout=timeout,
         impersonate=impersonate,
         allow_redirects=True,
+        proxies={"http": proxy_url, "https": proxy_url} if proxy_url else None,
     )
 
 
-def _playwright_fetch(url: str, timeout_ms: int = 15000) -> str | None:
-    """Fetch page HTML via headless Chromium (Playwright).
-
-    Returns the final page HTML, or *None* on failure.
-    Handles Cloudflare JS challenges transparently."""
+def _playwright_fetch(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_ms: int = 15000,
+    proxy_url: str | None = None,
+    storage_state: str | None = None,
+) -> FetchResult:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         logger.warning("Playwright is not installed; cannot use browser fallback")
-        return None
+        return FetchResult(ok=False, url=url, error="playwright unavailable", method="browser")
 
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=BROWSER_HEADERS["User-Agent"],
-                extra_http_headers={
+            launch_kwargs = {"headless": True}
+            if proxy_url:
+                launch_kwargs["proxy"] = {"server": proxy_url}
+            browser = pw.chromium.launch(**launch_kwargs)
+            context_kwargs = {
+                "user_agent": _browser_headers(headers)["User-Agent"],
+                "extra_http_headers": {
                     k: v
-                    for k, v in BROWSER_HEADERS.items()
+                    for k, v in _browser_headers(headers).items()
                     if k.lower() not in ("user-agent", "accept-encoding")
                 },
+            }
+            if storage_state and Path(storage_state).exists():
+                context_kwargs["storage_state"] = storage_state
+            context = browser.new_context(
+                **context_kwargs,
             )
             page = context.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            # Give Cloudflare JS challenge a moment to complete
             page.wait_for_timeout(3000)
             html = page.content()
+            final_url = page.url
             browser.close()
-            return html
+            blocked = _looks_like_block_page(html)
+            return FetchResult(
+                ok=not blocked,
+                url=final_url,
+                status_code=200,
+                text=html,
+                content=html.encode("utf-8"),
+                headers={"content-type": "text/html; charset=utf-8"},
+                method="browser",
+                blocked=blocked,
+                challenge_detected=blocked,
+                error="challenge page persisted" if blocked else "",
+                used_browser_fallback=True,
+            )
     except Exception as exc:
         logger.debug("Playwright fetch failed for %s: %s", url, exc)
-        return None
+        return FetchResult(ok=False, url=url, error=str(exc), method="browser", used_browser_fallback=True)
 
 
 def fetch_with_browser_fallback(
@@ -289,43 +536,177 @@ def fetch_with_browser_fallback(
     timeout: int = SCRAPE_TIMEOUT_SECONDS,
     impersonate: str = IMPERSONATE,
     context: str = "fetch",
+    proxy_url: str | None = None,
+    browser_storage_state: str | None = None,
 ):
-    """Fetch *url* via curl_cffi first; fall back to headless browser if blocked.
-
-    Returns a ``requests``-like response object, or *None* on total failure.
-    """
-    response = _curl_get(url, headers=headers, timeout=timeout, impersonate=impersonate)
-    if response is not None and not is_cloudflare_block(response):
+    response = _curl_get(
+        url,
+        headers=headers,
+        timeout=timeout,
+        impersonate=impersonate,
+        proxy_url=proxy_url,
+    )
+    if response is not None and response.status_code < 400 and not _looks_like_block_page(getattr(response, "text", "")):
         return response
 
-    if response is not None and is_cloudflare_block(response):
-        logger.info(
-            "%s: Cloudflare block detected for %s (status %s); switching to browser",
-            context,
-            url,
-            response.status_code,
+    if response is not None and is_blocked_response(response):
+        logger.info("%s: block detected for %s (status %s); switching to browser", context, url, response.status_code)
+
+    result = _playwright_fetch(
+        url,
+        headers=headers,
+        timeout_ms=int(timeout * 1000),
+        proxy_url=proxy_url,
+        storage_state=browser_storage_state,
+    )
+    if not result.ok:
+        logger.warning("%s: browser fallback failed for %s: %s", context, url, result.error or "blocked")
+        return None
+    return result.as_response()
+
+
+def fetch_url_with_retries(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = SCRAPE_TIMEOUT_SECONDS,
+    max_attempts: int = SCRAPE_MAX_ATTEMPTS,
+    deadline_monotonic: float | None = None,
+    context: str = "fetch",
+    fetch_mode: str = SCRAPE_DEFAULT_FETCH_MODE,
+    proxy_url: str | None = None,
+    browser_storage_state: str | None = None,
+    allow_browser: bool = True,
+    expect_html: bool = True,
+    impersonate: str = IMPERSONATE,
+):
+    last_result = FetchResult(ok=False, url=url, error="request not attempted")
+
+    def _merge_failure_results(primary: FetchResult, fallback: FetchResult) -> FetchResult:
+        merged_status_code = primary.status_code if primary.status_code is not None else fallback.status_code
+        merged_text = primary.text or fallback.text
+        merged_content = primary.content or fallback.content
+        merged_headers = dict(primary.headers or {})
+        fallback_headers = fallback.headers if isinstance(fallback.headers, dict) else {}
+        if not merged_headers and fallback_headers:
+            merged_headers = dict(fallback_headers)
+        merged_error = primary.error or fallback.error
+        if primary.error and fallback.error and fallback.error not in primary.error:
+            merged_error = f"{primary.error}; browser_fallback={fallback.error}"
+        return FetchResult(
+            ok=False,
+            url=primary.url or fallback.url or url,
+            status_code=merged_status_code,
+            text=merged_text,
+            content=merged_content,
+            headers=merged_headers,
+            method=fallback.method or primary.method,
+            blocked=primary.blocked or fallback.blocked,
+            rate_limited=primary.rate_limited or fallback.rate_limited,
+            challenge_detected=primary.challenge_detected or fallback.challenge_detected,
+            error=merged_error,
+            used_browser_fallback=primary.used_browser_fallback or fallback.used_browser_fallback,
         )
 
-    # Browser fallback
-    html = _playwright_fetch(url, timeout_ms=timeout * 1000)
-    if html is None:
-        logger.warning("%s: browser fallback also failed for %s", context, url)
-        return None
+    mode = _normalize_fetch_mode(fetch_mode)
+    effective_headers = _browser_headers(headers)
+    for attempt in range(1, max_attempts + 1):
+        now = time.monotonic()
+        if deadline_monotonic is not None and now >= deadline_monotonic:
+            return FetchResult(ok=False, url=url, error="deadline exhausted")
+        effective_timeout = timeout
+        if deadline_monotonic is not None:
+            remaining = max(0.0, deadline_monotonic - now)
+            if remaining <= 0:
+                return FetchResult(ok=False, url=url, error="deadline exhausted")
+            effective_timeout = min(timeout, max(1.0, int(remaining)))
 
-    # Wrap the HTML in a response-like object so callers don't break
-    class _BrowserResponse:
-        def __init__(self, text: str, url: str, status_code: int = 200):
-            self.text = text
-            self.content = text.encode("utf-8")
-            self.url = url
-            self.status_code = status_code
-            self.headers = {}
+        if allow_browser and expect_html and mode == "browser_first":
+            browser_result = _playwright_fetch(
+                url,
+                headers=effective_headers,
+                timeout_ms=int(effective_timeout * 1000),
+                proxy_url=proxy_url,
+                storage_state=browser_storage_state,
+            )
+            if browser_result.ok:
+                return browser_result
+            last_result = browser_result
 
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                raise RequestsError(f"Browser fallback HTTP {self.status_code}")
+        try:
+            response = _curl_get(
+                url,
+                headers=effective_headers,
+                timeout=effective_timeout,
+                impersonate=impersonate,
+                proxy_url=proxy_url,
+            )
+        except Exception as exc:
+            last_result = FetchResult(ok=False, url=url, error=str(exc), method="http_client")
+            response = None
 
-    return _BrowserResponse(html, url)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+            text = getattr(response, "text", "") or ""
+            blocked = is_blocked_response(response) if expect_html else status_code in (403, 429, 503)
+            rate_limited = status_code == 429
+            ok = status_code is not None and status_code < 400 and not blocked
+            if ok:
+                return FetchResult(
+                    ok=True,
+                    url=str(getattr(response, "url", "") or url),
+                    status_code=status_code,
+                    text=text,
+                    content=getattr(response, "content", b"") or text.encode("utf-8"),
+                    headers=dict(getattr(response, "headers", {}) or {}),
+                    method="http_client",
+                )
+
+            last_result = FetchResult(
+                ok=False,
+                url=str(getattr(response, "url", "") or url),
+                status_code=status_code,
+                text=text,
+                content=getattr(response, "content", b"") or text.encode("utf-8"),
+                headers=dict(getattr(response, "headers", {}) or {}),
+                method="http_client",
+                blocked=blocked,
+                rate_limited=rate_limited,
+                challenge_detected=_looks_like_block_page(text),
+                error=f"HTTP {status_code}" if status_code is not None else "request failed",
+            )
+            should_browser_fallback = allow_browser and expect_html and mode == "browser_on_block" and (
+                blocked or rate_limited
+            )
+            if should_browser_fallback:
+                http_failure = last_result
+                browser_result = _playwright_fetch(
+                    url,
+                    headers=effective_headers,
+                    timeout_ms=int(effective_timeout * 1000),
+                    proxy_url=proxy_url,
+                    storage_state=browser_storage_state,
+                )
+                if browser_result.ok:
+                    return browser_result
+                last_result = _merge_failure_results(http_failure, browser_result)
+
+            if status_code is not None and status_code < 500 and status_code not in (403, 429, 503):
+                break
+
+        if attempt == max_attempts:
+            break
+        sleep_seconds = SCRAPE_BACKOFF_BASE_SECONDS * attempt + random.uniform(0, SCRAPE_BACKOFF_JITTER_SECONDS)
+        if deadline_monotonic is not None:
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                break
+            sleep_seconds = min(sleep_seconds, max(0.0, remaining))
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+    logger.warning("%s: failed to fetch %s after retries: %s", context, url, last_result.error)
+    return last_result
 
 
 def scrape_html_with_retries(
@@ -333,102 +714,27 @@ def scrape_html_with_retries(
     *,
     headers: dict[str, str] | None = None,
     timeout: int = SCRAPE_TIMEOUT_SECONDS,
+    max_attempts: int = SCRAPE_MAX_ATTEMPTS,
     deadline_monotonic: float | None = None,
     context: str = "scrape",
+    fetch_mode: str = SCRAPE_DEFAULT_FETCH_MODE,
+    proxy_url: str | None = None,
+    browser_storage_state: str | None = None,
 ):
-    """Fetch *url* with retry + browser-impersonation + Cloudflare fallback.
-
-    First attempts via curl_cffi (TLS fingerprint mimicry).  On the last
-    attempt, if the response looks like a Cloudflare block, Playwright is
-    used as a headless-browser fallback."""
-    last_error = None
-    effective_headers = headers or BROWSER_HEADERS
-
-    for attempt in range(1, SCRAPE_MAX_ATTEMPTS + 1):
-        now = time.monotonic()
-        if deadline_monotonic is not None and now >= deadline_monotonic:
-            logger.warning("%s: skipping %s because scrape time budget was exhausted", context, url)
-            return None
-
-        effective_timeout = timeout
-        if deadline_monotonic is not None:
-            remaining = max(0.0, deadline_monotonic - now)
-            if remaining <= 0:
-                logger.warning("%s: skipping %s because scrape time budget was exhausted", context, url)
-                return None
-            effective_timeout = min(timeout, max(1.0, remaining))
-
-        # --- Last attempt with Cloudflare detected → use browser fallback ---
-        is_last = attempt == SCRAPE_MAX_ATTEMPTS
-        if is_last:
-            response = fetch_with_browser_fallback(
-                url,
-                headers=effective_headers,
-                timeout=effective_timeout,
-                impersonate=IMPERSONATE,
-                context=context,
-            )
-            if response is not None:
-                return response
-            # fall through to logging
-            last_error = RuntimeError("Cloudflare block persisted across all attempts")
-            break
-
-        # --- curl_cffi attempt ---
-        try:
-            response = _curl_get(
-                url,
-                headers=effective_headers,
-                timeout=effective_timeout,
-                impersonate=IMPERSONATE,
-            )
-
-            # Detect Cloudflare block early — retry with backoff
-            if is_cloudflare_block(response):
-                raise RequestsError(
-                    f"Cloudflare block HTTP {response.status_code}",
-                    response=response,
-                )
-
-            if response.status_code in SCRAPE_RETRYABLE_STATUS_CODES:
-                raise RequestsError(
-                    f"retryable HTTP {response.status_code}",
-                    response=response,
-                )
-            response.raise_for_status()
-            return response
-
-        except RequestsError as exc:
-            last_error = exc
-            status_code = exc.response.status_code if exc.response is not None else None
-            # Non-retryable status codes (e.g. non-Cloudflare 403): stop retrying.
-            if status_code is not None and status_code not in SCRAPE_RETRYABLE_STATUS_CODES:
-                if is_cloudflare_block(exc.response):
-                    pass  # Cloudflare 403/503 → keep retrying
-                else:
-                    break
-        except Exception as exc:
-            last_error = exc
-            break
-
-        if attempt == SCRAPE_MAX_ATTEMPTS:
-            break
-
-        sleep_seconds = SCRAPE_BACKOFF_BASE_SECONDS * attempt + random.uniform(
-            0,
-            SCRAPE_BACKOFF_JITTER_SECONDS,
-        )
-        if deadline_monotonic is not None:
-            remaining = deadline_monotonic - time.monotonic()
-            if remaining <= 0:
-                break
-            sleep_seconds = min(sleep_seconds, max(0.0, remaining))
-
-        if sleep_seconds > 0:
-            time.sleep(sleep_seconds)
-
-    logger.warning("%s: failed to fetch %s after retries: %s", context, url, last_error)
-    return None
+    result = fetch_url_with_retries(
+        url,
+        headers=headers,
+        timeout=timeout,
+        max_attempts=max_attempts,
+        deadline_monotonic=deadline_monotonic,
+        context=context,
+        fetch_mode=fetch_mode,
+        proxy_url=proxy_url,
+        browser_storage_state=browser_storage_state,
+        allow_browser=True,
+        expect_html=True,
+    )
+    return result.as_response()
 
 
 # ---------------------------------------------------------------------------

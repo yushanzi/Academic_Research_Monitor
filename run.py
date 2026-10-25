@@ -65,14 +65,21 @@ def get_enabled_sources(config: dict | AppConfig) -> list:
             continue
 
         cls = get_source_class(name)
-        instances.append(_build_source_instance(name, cls, src_cfg))
+        instances.append(_build_source_instance(name, cls, src_cfg, config))
 
     return instances
 
 
-def _build_source_instance(name: str, cls, src_cfg: dict):
+def _build_source_instance(name: str, cls, src_cfg: dict, config: dict | AppConfig):
     init_params = inspect.signature(cls.__init__).parameters
     supported_kwargs = {}
+
+    if "scraping" in init_params:
+        scraping_cfg = config.scraping if isinstance(config, AppConfig) else config.get("scraping", {})
+        supported_kwargs["scraping"] = scraping_cfg
+    if "network" in init_params:
+        network_cfg = config.network if isinstance(config, AppConfig) else config.get("network", {})
+        supported_kwargs["network"] = network_cfg
 
     for key, value in src_cfg.items():
         if key == "enabled":
@@ -232,6 +239,7 @@ def _run_pipeline(
         abstract_scored_count,
         raw_fetched_by_source,
     )
+    source_diagnostics = _collect_source_diagnostics(source_instances)
 
     run_stats = _build_run_stats(
         date_str=date_str,
@@ -241,6 +249,7 @@ def _run_pipeline(
         deduplicated_candidate_count=len(candidate_papers),
         abstract_scored_count=abstract_scored_count,
         selected_unique_count=len(abstract_selected_papers),
+        source_diagnostics=source_diagnostics,
     )
 
     if not abstract_selected_papers:
@@ -248,14 +257,14 @@ def _run_pipeline(
         _write_run_stats(run_stats, output_dir)
         if not dry_run and config.email.send_empty_notification:
             reason = "no_relevant" if raw_fetched_count > 0 else "no_candidates"
-            _require_mailer("send_empty_notification")(config_dict, date_str, reason=reason)
+            _require_mailer("send_empty_notification")(config_dict, date_str, reason=reason, run_stats=run_stats)
         elif not dry_run:
             logger.info("Skipping empty notification email because email.send_empty_notification=false")
         return 0
 
     selected_papers: list[Paper] = list(abstract_selected_papers)
 
-    access_provider = get_access_provider(config.access.mode)
+    access_provider = get_access_provider(config.access.mode, app_config=config)
     for paper in selected_papers:
         access_info = access_provider.resolve(paper)
         paper.apply_access_info(access_info)
@@ -287,6 +296,7 @@ def _run_pipeline(
         deduplicated_candidate_count=len(candidate_papers),
         abstract_scored_count=abstract_scored_count,
         selected_unique_count=len(analyzed_papers),
+        source_diagnostics=source_diagnostics,
     )
     _write_run_stats(run_stats, output_dir)
 
@@ -304,7 +314,7 @@ def _run_pipeline(
         logger.info("Dry run mode — skipping email delivery")
         return 0
 
-    _require_mailer("send_report")(pdf_path, len(analyzed_papers), config_dict, date_str)
+    _require_mailer("send_report")(pdf_path, len(analyzed_papers), config_dict, date_str, run_stats=run_stats)
     logger.info("Done!")
     return 0
 
@@ -322,8 +332,9 @@ def _build_run_stats(
     deduplicated_candidate_count: int,
     abstract_scored_count: int,
     selected_unique_count: int,
+    source_diagnostics: dict[str, dict] | None = None,
 ) -> dict:
-    return {
+    stats = {
         "date": date_str,
         "instance_name": instance_name,
         "raw_fetched_count": raw_fetched_count,
@@ -333,6 +344,25 @@ def _build_run_stats(
         "selected_unique_count": selected_unique_count,
         "report_count_display": f"{selected_unique_count}/{raw_fetched_count}",
     }
+    if source_diagnostics:
+        stats["source_diagnostics"] = source_diagnostics
+    return stats
+
+
+def _collect_source_diagnostics(source_instances: list) -> dict[str, dict]:
+    diagnostics: dict[str, dict] = {}
+    for source in source_instances:
+        getter = getattr(source, "get_diagnostics", None)
+        if not callable(getter):
+            continue
+        try:
+            value = getter()
+        except Exception:
+            logging.getLogger("main").warning("Failed to collect diagnostics for source '%s'", source.name, exc_info=True)
+            continue
+        if isinstance(value, dict):
+            diagnostics[source.name] = value
+    return diagnostics
 
 
 def _run_stats_path(output_dir: str, date_str: str) -> str:

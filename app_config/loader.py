@@ -11,6 +11,7 @@ from scoring.config import (
     parse_abstract_selection_config,
     parse_candidate_scoring_config,
 )
+from schedule_utils import build_cron_with_jitter
 
 from .schema import (
     DEFAULT_EMAIL_FROM,
@@ -19,8 +20,10 @@ from .schema import (
     EmailConfig,
     InterestProfileQueryConfig,
     LLMConfig,
+    NetworkConfig,
     RetentionConfig,
     ScheduleConfig,
+    ScrapingConfig,
     UserConfig,
 )
 
@@ -37,6 +40,8 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "access",
     "interest_profile_query",
     "retention",
+    "scraping",
+    "network",
     "content_analysis",
     "abstract_selection",
     "candidate_scoring",
@@ -80,6 +85,8 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
     sources_raw = raw.get("sources") or {}
     interest_profile_query_raw = raw.get("interest_profile_query") or {}
     retention_raw = raw.get("retention") or {}
+    scraping_raw = raw.get("scraping") or {}
+    network_raw = raw.get("network") or {}
     content_analysis_raw = raw.get("content_analysis") or {}
     abstract_selection_raw = raw.get("abstract_selection") or {}
     candidate_scoring_raw = raw.get("candidate_scoring") or {}
@@ -98,6 +105,10 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
         raise ValueError("schedule.timezone must be 'Asia/Hong_Kong' or 'UTC'")
 
     run_on_start = bool(schedule_raw.get("run_on_start", False))
+    random_jitter_minutes = schedule_raw.get("random_jitter_minutes", 0)
+    if isinstance(random_jitter_minutes, bool) or not isinstance(random_jitter_minutes, int) or random_jitter_minutes < 0:
+        raise ValueError("schedule.random_jitter_minutes must be a non-negative integer")
+    build_cron_with_jitter(cron, random_jitter_minutes)
 
     time_range_hours = raw.get("time_range_hours", 24)
     if not isinstance(time_range_hours, int) or time_range_hours <= 0:
@@ -166,6 +177,39 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
     if not isinstance(retention_days, int) or retention_days <= 0:
         raise ValueError("retention.days must be a positive integer")
 
+    if not isinstance(scraping_raw, dict):
+        raise ValueError("scraping must be an object")
+    default_fetch_mode = str(scraping_raw.get("default_fetch_mode", "browser_on_block")).strip() or "browser_on_block"
+    if default_fetch_mode not in {"http_client", "browser_on_block", "browser_first"}:
+        raise ValueError(
+            "scraping.default_fetch_mode must be 'http_client', 'browser_on_block', or 'browser_first'"
+        )
+    default_timeout_seconds = scraping_raw.get("default_timeout_seconds", 15)
+    if not isinstance(default_timeout_seconds, int) or default_timeout_seconds <= 0:
+        raise ValueError("scraping.default_timeout_seconds must be a positive integer")
+    default_retry_attempts = scraping_raw.get("default_retry_attempts", 3)
+    if not isinstance(default_retry_attempts, int) or default_retry_attempts <= 0:
+        raise ValueError("scraping.default_retry_attempts must be a positive integer")
+    default_min_request_interval_seconds = scraping_raw.get("default_min_request_interval_seconds", 0.0)
+    if not isinstance(default_min_request_interval_seconds, (int, float)) or default_min_request_interval_seconds < 0:
+        raise ValueError("scraping.default_min_request_interval_seconds must be a non-negative number")
+    default_jitter_seconds = scraping_raw.get("default_jitter_seconds", 0.0)
+    if not isinstance(default_jitter_seconds, (int, float)) or default_jitter_seconds < 0:
+        raise ValueError("scraping.default_jitter_seconds must be a non-negative number")
+
+    if not isinstance(network_raw, dict):
+        raise ValueError("network must be an object")
+    proxies_raw = network_raw.get("proxies", {})
+    if not isinstance(proxies_raw, dict):
+        raise ValueError("network.proxies must be an object")
+    normalized_proxies = {}
+    for proxy_name, proxy_value in proxies_raw.items():
+        normalized_proxy_name = str(proxy_name).strip()
+        normalized_proxy_value = str(proxy_value).strip()
+        if not normalized_proxy_name or not normalized_proxy_value:
+            raise ValueError("network.proxies entries must have non-empty names and values")
+        normalized_proxies[normalized_proxy_name] = normalized_proxy_value
+
     if not isinstance(candidate_scoring_raw, dict):
         raise ValueError("candidate_scoring must be an object")
     if not isinstance(abstract_selection_raw, dict):
@@ -186,7 +230,12 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
 
     config = AppConfig(
         user=UserConfig(name=user_name),
-        schedule=ScheduleConfig(cron=cron, timezone=timezone, run_on_start=run_on_start),
+        schedule=ScheduleConfig(
+            cron=cron,
+            timezone=timezone,
+            random_jitter_minutes=random_jitter_minutes,
+            run_on_start=run_on_start,
+        ),
         sources=normalized_sources,
         time_range_hours=time_range_hours,
         llm=llm_config,
@@ -202,6 +251,14 @@ def app_config_from_dict(raw: dict, *, config_path: str = "config.json") -> AppC
             max_query_synonyms=max_query_synonyms,
         ),
         retention=RetentionConfig(days=retention_days),
+        scraping=ScrapingConfig(
+            default_fetch_mode=default_fetch_mode,
+            default_timeout_seconds=default_timeout_seconds,
+            default_retry_attempts=default_retry_attempts,
+            default_min_request_interval_seconds=float(default_min_request_interval_seconds),
+            default_jitter_seconds=float(default_jitter_seconds),
+        ),
+        network=NetworkConfig(proxies=normalized_proxies),
         content_analysis=content_analysis,
         abstract_selection=abstract_selection,
         candidate_scoring=candidate_scoring,

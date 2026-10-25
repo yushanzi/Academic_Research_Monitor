@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from schedule_utils import format_schedule_display
 from weasyprint import HTML
 
 from models import Paper
@@ -57,23 +58,7 @@ def _group_papers_by_topic(papers: list[Paper], grouping_topics: list[str]) -> t
 
 
 def _format_schedule_display(schedule: dict) -> str:
-    cron = str((schedule or {}).get("cron", "")).strip()
-    timezone = str((schedule or {}).get("timezone", "UTC")).strip() or "UTC"
-    if not cron:
-        return f"N/A（{timezone}）"
-
-    parts = cron.split()
-    if len(parts) == 5:
-        minute, hour, day_of_month, month, day_of_week = parts
-        if day_of_month == "*" and month == "*" and day_of_week == "*" and minute.isdigit() and hour.isdigit():
-            hour_24 = int(hour)
-            minute_value = int(minute)
-            if 0 <= hour_24 <= 23 and 0 <= minute_value <= 59:
-                suffix = "AM" if hour_24 < 12 else "PM"
-                hour_12 = hour_24 % 12 or 12
-                return f"每天 {hour_12}:{minute_value:02d} {suffix}（{timezone}）"
-
-    return f"{cron} ({timezone})"
+    return format_schedule_display(schedule)
 
 
 def _summary_label(paper: Paper) -> str:
