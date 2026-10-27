@@ -1,6 +1,7 @@
 import io
 import json
 import os
+from pathlib import Path
 import tempfile
 import unittest
 from contextlib import contextmanager, redirect_stdout
@@ -116,6 +117,58 @@ class RunModuleTests(unittest.TestCase):
         self.assertEqual(len(instances), 1)
         self.assertEqual(instances[0].journals, ["a", "b"])
         self.assertTrue(any("unsupported config key 'unexpected'" in msg for msg in logs.output))
+
+    def test_warn_if_browser_fallback_unavailable_for_nature(self):
+        config = app_config_from_dict(
+            {
+                "user": {"name": "monitor_a"},
+                "sources": {"nature": {"enabled": True}},
+                "llm": {"provider": "claude", "model": "root-model"},
+                "email": {"recipient": "test@example.com"},
+            }
+        )
+
+        logger = MagicMock()
+        with patch.object(run, "playwright_browser_status", return_value=(False, "missing browser")) as status_mock:
+            run._warn_if_browser_fallback_unavailable(config, logger)
+
+        status_mock.assert_called_once()
+        logger.warning.assert_called_once()
+
+    def test_warn_if_browser_fallback_skips_when_nature_disabled(self):
+        config = app_config_from_dict(
+            {
+                "user": {"name": "monitor_a"},
+                "sources": {"arxiv": {"enabled": True}},
+                "llm": {"provider": "claude", "model": "root-model"},
+                "email": {"recipient": "test@example.com"},
+            }
+        )
+
+        logger = MagicMock()
+        with patch.object(run, "playwright_browser_status") as status_mock:
+            run._warn_if_browser_fallback_unavailable(config, logger)
+
+        status_mock.assert_not_called()
+        logger.warning.assert_not_called()
+
+    def test_normalize_source_file_paths_resolves_browser_storage_state_relative_to_config(self):
+        config = app_config_from_dict(
+            {
+                "user": {"name": "monitor_a"},
+                "sources": {"acs": {"enabled": True, "browser_storage_state": "access/acs-session.json"}},
+                "llm": {"provider": "claude", "model": "root-model"},
+                "email": {"recipient": "test@example.com"},
+            },
+            config_path="/tmp/work/instances/monitor_a/config.json",
+        )
+
+        run._normalize_source_file_paths(config, "/tmp/work/instances/monitor_a/config.json")
+
+        self.assertEqual(
+            config.sources["acs"]["browser_storage_state"],
+            str(Path("/tmp/work/instances/monitor_a/access/acs-session.json").resolve()),
+        )
 
     def test_main_dry_run_executes_pipeline_without_email(self):
         fake_source = MagicMock()
@@ -276,6 +329,7 @@ class RunModuleTests(unittest.TestCase):
         )
         logger = MagicMock()
         selected_paper = fake_source.fetch_papers.return_value[0]
+        selected_paper.discovery_method = "rss"
         selected_paper.relevance = AbstractRelevanceResult(
             is_relevant=True,
             relevance_score=0.8,
@@ -325,6 +379,8 @@ class RunModuleTests(unittest.TestCase):
                                 open_access=False,
                                 effective_access_mode="abstract_only",
                                 evidence_level="abstract_only",
+                                access_route="none",
+                                access_note="未访问到可用的开放获取落地页或 PDF。",
                             )
                             with patch.object(
                                 run,
@@ -357,6 +413,11 @@ class RunModuleTests(unittest.TestCase):
             self.assertEqual(stats["abstract_scored_count"], 2)
             self.assertEqual(stats["selected_unique_count"], 1)
             self.assertEqual(stats["report_count_display"], "1/2")
+            self.assertEqual(len(stats["paper_access_summary"]), 1)
+            self.assertEqual(stats["paper_access_summary"][0]["discovery_method"], "rss")
+            self.assertEqual(stats["paper_access_summary"][0]["access_path"], "abstract_only")
+            self.assertEqual(stats["paper_access_summary"][0]["access_note"], "未访问到可用的开放获取落地页或 PDF。")
+            self.assertEqual(stats["access_path_breakdown"], {"abstract_only": 1})
             self.assertEqual(fake_generate_report.call_args.args[5]["report_count_display"], "1/2")
 
     def test_run_pipeline_writes_run_stats_for_empty_selection(self):
@@ -423,6 +484,8 @@ class RunModuleTests(unittest.TestCase):
             self.assertEqual(stats["raw_fetched_count"], 1)
             self.assertEqual(stats["selected_unique_count"], 0)
             self.assertEqual(stats["report_count_display"], "0/1")
+            self.assertEqual(stats["paper_access_summary"], [])
+            self.assertEqual(stats["access_path_breakdown"], {})
 
     def test_run_pipeline_prunes_old_runtime_artifacts_only(self):
         fake_source = MagicMock()

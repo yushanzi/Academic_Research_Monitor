@@ -7,6 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,8 @@ TOPIC_STOPWORDS = {
 # Cloudflare detection
 # ---------------------------------------------------------------------------
 CLOUDFLARE_MARKERS = (
+    "403 forbidden",
+    "cookies must be enabled",
     "cf-browser-verification",
     "cf-chl-bypass",
     "cf-challenge",
@@ -89,8 +92,13 @@ CLOUDFLARE_MARKERS = (
     "checking your browser",
     "cloudflare",
     "enable javascript",
+    "g-recaptcha",
     "just a moment",
+    "recaptcha",
+    "challengepage",
+    "n_pow_challenge",
     "turnstile",
+    "unusual traffic from your network",
     "__cf_chl",
 )
 
@@ -301,6 +309,7 @@ def build_paper(
     doi: str = "",
     pdf_url: str = "",
     landing_page_url: str | None = None,
+    discovery_method: str = "unknown",
 ) -> Paper:
     landing_page_url = landing_page_url or url or _doi_url(doi)
     entry_url = landing_page_url or _doi_url(doi)
@@ -321,6 +330,9 @@ def build_paper(
         open_access=bool(pdf_url),
         effective_access_mode="open_access" if pdf_url else "abstract_only",
         evidence_level="abstract_only",
+        discovery_method=discovery_method,
+        access_route="none",
+        access_note="",
         matched_topics=[],
     )
 
@@ -485,48 +497,111 @@ def _playwright_fetch(
         logger.warning("Playwright is not installed; cannot use browser fallback")
         return FetchResult(ok=False, url=url, error="playwright unavailable", method="browser")
 
+    attempts = []
     try:
         with sync_playwright() as pw:
             launch_kwargs = {"headless": True}
             if proxy_url:
                 launch_kwargs["proxy"] = {"server": proxy_url}
             browser = pw.chromium.launch(**launch_kwargs)
-            context_kwargs = {
-                "user_agent": _browser_headers(headers)["User-Agent"],
-                "extra_http_headers": {
-                    k: v
-                    for k, v in _browser_headers(headers).items()
-                    if k.lower() not in ("user-agent", "accept-encoding")
-                },
-            }
-            if storage_state and Path(storage_state).exists():
-                context_kwargs["storage_state"] = storage_state
-            context = browser.new_context(
-                **context_kwargs,
-            )
-            page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            page.wait_for_timeout(3000)
-            html = page.content()
-            final_url = page.url
-            browser.close()
-            blocked = _looks_like_block_page(html)
-            return FetchResult(
-                ok=not blocked,
-                url=final_url,
-                status_code=200,
-                text=html,
-                content=html.encode("utf-8"),
-                headers={"content-type": "text/html; charset=utf-8"},
-                method="browser",
-                blocked=blocked,
-                challenge_detected=blocked,
-                error="challenge page persisted" if blocked else "",
-                used_browser_fallback=True,
-            )
+            try:
+                for context_kwargs in _playwright_context_variants(headers=headers, storage_state=storage_state):
+                    context = browser.new_context(**context_kwargs)
+                    try:
+                        page = context.new_page()
+                        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                        page.wait_for_timeout(3000)
+                        html = _read_page_content_with_retries(page, url)
+                        final_url = page.url
+                        if not html:
+                            attempts.append("browser content unavailable")
+                            continue
+                        blocked = _looks_like_block_page(html)
+                        if blocked:
+                            attempts.append("challenge page persisted")
+                            continue
+                        return FetchResult(
+                            ok=True,
+                            url=final_url,
+                            status_code=200,
+                            text=html,
+                            content=html.encode("utf-8"),
+                            headers={"content-type": "text/html; charset=utf-8"},
+                            method="browser",
+                            blocked=False,
+                            challenge_detected=False,
+                            error="",
+                            used_browser_fallback=True,
+                        )
+                    finally:
+                        context.close()
+            finally:
+                browser.close()
+        error = "; ".join(dict.fromkeys(attempts)) if attempts else "browser fetch failed"
+        return FetchResult(
+            ok=False,
+            url=url,
+            error=error,
+            method="browser",
+            used_browser_fallback=True,
+            blocked="challenge page persisted" in attempts,
+            challenge_detected="challenge page persisted" in attempts,
+        )
     except Exception as exc:
         logger.debug("Playwright fetch failed for %s: %s", url, exc)
         return FetchResult(ok=False, url=url, error=str(exc), method="browser", used_browser_fallback=True)
+
+
+def _playwright_context_variants(
+    *,
+    headers: dict[str, str] | None = None,
+    storage_state: str | None = None,
+) -> list[dict[str, Any]]:
+    variants: list[dict[str, Any]] = []
+    header_kwargs = {
+        "user_agent": _browser_headers(headers)["User-Agent"],
+        "extra_http_headers": {
+            k: v
+            for k, v in _browser_headers(headers).items()
+            if k.lower() not in ("user-agent", "accept-encoding")
+        },
+    }
+    if storage_state and Path(storage_state).exists():
+        header_kwargs["storage_state"] = storage_state
+    variants.append(header_kwargs)
+
+    plain_kwargs: dict[str, Any] = {}
+    if storage_state and Path(storage_state).exists():
+        plain_kwargs["storage_state"] = storage_state
+    variants.append(plain_kwargs)
+    return variants
+
+
+def _read_page_content_with_retries(page, url: str) -> str:
+    for wait_ms in (0, 1500, 3000):
+        if wait_ms > 0:
+            page.wait_for_timeout(wait_ms)
+        try:
+            return page.content()
+        except Exception as exc:
+            logger.debug("Playwright content read retry for %s after %sms: %s", url, wait_ms, exc)
+    return ""
+
+
+@lru_cache(maxsize=1)
+def playwright_browser_status() -> tuple[bool, str]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False, "playwright unavailable"
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            browser.close()
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 def fetch_with_browser_fallback(

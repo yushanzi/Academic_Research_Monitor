@@ -100,6 +100,7 @@ class ArxivSource(PaperSource):
                     source="arXiv",
                     doi=doi,
                     pdf_url=pdf_url,
+                    discovery_method="api",
                 )
             )
 

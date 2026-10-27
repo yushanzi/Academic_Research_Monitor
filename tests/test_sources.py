@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
@@ -78,6 +79,91 @@ class SourceTests(unittest.TestCase):
             "Journal of Chemical Theory and Computation",
         )
         self.assertIn("jc=jctcce", ACS_FEEDS["jctcce"]["url"])
+        self.assertEqual(ACS_FEEDS["jctcce"]["crossref_issn"], "1549-9618")
 
         source = ACSSource()
         self.assertIn("jctcce", source.journals)
+
+    def test_acs_source_falls_back_to_crossref_when_feed_is_empty(self):
+        today = datetime.now(timezone.utc).date().isoformat()
+        payload = {
+            "message": {
+                "items": [
+                    {
+                        "title": ["Machine Learning Force Fields for Composite Polymer Electrolytes"],
+                        "abstract": "<jats:p>Machine learning force fields improve polymer electrolyte modeling.</jats:p>",
+                        "DOI": "10.1021/acs.jctc.6c01183",
+                        "URL": "https://doi.org/10.1021/acs.jctc.6c01183",
+                        "author": [
+                            {"given": "Ada", "family": "Lovelace"},
+                            {"given": "Grace", "family": "Hopper"},
+                        ],
+                        "published-online": {"date-parts": [[2026, 10, 9]]},
+                    }
+                ]
+            }
+        }
+        crossref_response = Mock()
+        crossref_response.text = json.dumps(payload)
+
+        source = ACSSource(journals=["jctcce"])
+        with patch.object(source, "_parse_feed", return_value=[]):
+            with patch.object(source, "_fetch_phase", return_value=crossref_response) as mock_fetch:
+                papers = source.fetch_papers(["polymer electrolyte"], 24 * 60)
+
+        self.assertEqual(len(papers), 1)
+        self.assertEqual(papers[0].doi, "10.1021/acs.jctc.6c01183")
+        self.assertEqual(papers[0].authors, ["Ada Lovelace", "Grace Hopper"])
+        self.assertIn("Machine learning force fields improve polymer electrolyte modeling.", papers[0].abstract)
+        self.assertIn("api.crossref.org/journals/1549-9618/works", mock_fetch.call_args.args[0])
+        self.assertIn("from-pub-date", mock_fetch.call_args.args[0])
+        self.assertEqual(mock_fetch.call_args.kwargs["headers"]["Accept"], "application/json")
+
+    def test_acs_source_crossref_fallback_skips_items_outside_cutoff(self):
+        payload = {
+            "message": {
+                "items": [
+                    {
+                        "title": ["Old paper"],
+                        "abstract": "<jats:p>Old abstract</jats:p>",
+                        "DOI": "10.1021/acs.jctc.old",
+                        "URL": "https://doi.org/10.1021/acs.jctc.old",
+                        "published-online": {"date-parts": [[2026, 1, 1]]},
+                    }
+                ]
+            }
+        }
+        crossref_response = Mock()
+        crossref_response.text = json.dumps(payload)
+
+        source = ACSSource(journals=["jctcce"])
+        with patch.object(source, "_parse_feed", return_value=[]):
+            with patch.object(source, "_fetch_phase", return_value=crossref_response):
+                papers = source.fetch_papers(["old abstract"], 24)
+
+        self.assertEqual(papers, [])
+
+    def test_acs_source_crossref_fallback_uses_openalex_abstract_when_crossref_abstract_missing(self):
+        payload = {
+            "message": {
+                "items": [
+                    {
+                        "title": ["Machine Learning Force Fields for Composite Polymer Electrolytes"],
+                        "DOI": "10.1021/acs.jctc.6c01183",
+                        "URL": "https://doi.org/10.1021/acs.jctc.6c01183",
+                        "published-online": {"date-parts": [[2026, 10, 9]]},
+                    }
+                ]
+            }
+        }
+        crossref_response = Mock()
+        crossref_response.text = json.dumps(payload)
+
+        source = ACSSource(journals=["jctcce"])
+        with patch.object(source, "_parse_feed", return_value=[]):
+            with patch.object(source, "_fetch_phase", return_value=crossref_response):
+                with patch("sources.acs_source.resolve_openalex_abstract", return_value="Machine learning force fields improve polymer electrolyte modeling."):
+                    papers = source.fetch_papers(["polymer electrolyte"], 24 * 60)
+
+        self.assertEqual(len(papers), 1)
+        self.assertIn("polymer electrolyte modeling", papers[0].abstract)

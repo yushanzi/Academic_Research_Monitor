@@ -26,6 +26,8 @@ class AccessInfo:
     open_access: bool = False
     effective_access_mode: str = "abstract_only"
     evidence_level: str = "abstract_only"
+    access_route: str = "none"
+    access_note: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -49,6 +51,9 @@ class Paper:
     open_access: bool = False
     effective_access_mode: str = "abstract_only"
     evidence_level: str = "abstract_only"
+    discovery_method: str = "unknown"
+    access_route: str = "none"
+    access_note: str = ""
     matched_topics: list[str] = field(default_factory=list)
     analysis: dict[str, Any] = field(default_factory=dict)
     relevance: Any | None = None
@@ -81,6 +86,9 @@ class Paper:
             open_access=bool(raw.get("open_access", False)),
             effective_access_mode=str(raw.get("effective_access_mode", "abstract_only")),
             evidence_level=str(raw.get("evidence_level", "abstract_only")),
+            discovery_method=str(raw.get("discovery_method", "unknown")),
+            access_route=str(raw.get("access_route", "none")),
+            access_note=str(raw.get("access_note", "")),
             matched_topics=[str(topic) for topic in matched_topics],
             analysis=dict(raw.get("analysis") or {}),
             relevance=raw.get("relevance"),
@@ -95,6 +103,8 @@ class Paper:
         self.open_access = access_info.open_access
         self.effective_access_mode = access_info.effective_access_mode
         self.evidence_level = access_info.evidence_level
+        self.access_route = access_info.access_route
+        self.access_note = access_info.access_note
 
 
 def ensure_paper(raw: Paper | Mapping[str, Any]) -> Paper:

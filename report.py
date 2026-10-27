@@ -65,6 +65,66 @@ def _summary_label(paper: Paper) -> str:
     return "全文总结" if paper.evidence_level == "full_text" or paper.full_text_available else "摘要总结"
 
 
+def _discovery_label(paper: Paper) -> str:
+    labels = {
+        "api": "API",
+        "rss": "RSS",
+        "crossref": "Crossref",
+        "unknown": "Unknown",
+    }
+    return labels.get((paper.discovery_method or "unknown").strip().lower(), paper.discovery_method or "Unknown")
+
+
+def _access_label(paper: Paper) -> str:
+    route = (paper.access_route or "none").strip().lower()
+    evidence = (paper.evidence_level or "abstract_only").strip() or "abstract_only"
+    if route and route != "none":
+        return f"{route}/{evidence}"
+    return evidence
+
+
+def _source_warning_items(run_stats: dict | None) -> list[str]:
+    diagnostics = (run_stats or {}).get("source_diagnostics") or {}
+    warning_items: list[str] = []
+
+    for source_name, source_stats in diagnostics.items():
+        if not isinstance(source_stats, dict):
+            continue
+        phase_messages = []
+        for phase, phase_stats in source_stats.items():
+            if not isinstance(phase_stats, dict):
+                continue
+            blocked = int(phase_stats.get("blocked", 0) or 0)
+            rate_limited = int(phase_stats.get("rate_limited", 0) or 0)
+            failures = int(phase_stats.get("failures", 0) or 0)
+            last_status = str(phase_stats.get("last_status", "") or "")
+            if blocked <= 0 and rate_limited <= 0 and failures <= 0:
+                continue
+
+            details = []
+            if blocked > 0:
+                details.append(f"blocked {blocked}")
+            if rate_limited > 0:
+                details.append(f"rate_limited {rate_limited}")
+            if failures > 0:
+                details.append(f"failed {failures}")
+            if last_status and last_status != "ok":
+                details.append(f"last={last_status}")
+            phase_messages.append(f"{phase}: {', '.join(details)}")
+
+        if phase_messages:
+            warning_items.append(f"{source_name} - {'; '.join(phase_messages)}")
+
+    return warning_items
+
+
+def _format_access_breakdown(run_stats: dict | None) -> str:
+    breakdown = (run_stats or {}).get("access_path_breakdown") or {}
+    if not isinstance(breakdown, dict) or not breakdown:
+        return "N/A"
+    return "；".join(f"{path}: {count}" for path, count in breakdown.items())
+
+
 def generate_report(
     papers: list[Paper],
     trend_summary: dict,
@@ -90,6 +150,8 @@ def generate_report(
     grouping_topics = profile_topics
     papers_by_topic, ungrouped_papers = _group_papers_by_topic(papers, grouping_topics)
     schedule_display = _format_schedule_display(schedule)
+    source_warning_items = _source_warning_items(run_stats)
+    access_breakdown_display = _format_access_breakdown(run_stats)
 
     html_content = template.render(
         date=date_str,
@@ -105,6 +167,10 @@ def generate_report(
         schedule=schedule,
         schedule_display=schedule_display,
         summary_label=_summary_label,
+        discovery_label=_discovery_label,
+        access_label=_access_label,
+        source_warning_items=source_warning_items,
+        access_breakdown_display=access_breakdown_display,
         run_stats=run_stats or {},
     )
 

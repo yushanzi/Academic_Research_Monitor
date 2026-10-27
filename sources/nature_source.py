@@ -108,6 +108,7 @@ class NatureSource(PublisherSource):
                     url=link,
                     source="Nature",
                     doi=doi,
+                    discovery_method="rss",
                 )
             )
 

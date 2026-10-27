@@ -80,6 +80,7 @@ class BiorxivSource(PaperSource):
                         url=f"https://doi.org/{doi}" if doi else "",
                         source="bioRxiv",
                         doi=doi,
+                        discovery_method="api",
                     )
                 )
 

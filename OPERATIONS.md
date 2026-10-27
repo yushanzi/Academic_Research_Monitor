@@ -64,6 +64,12 @@ Rules:
 - keep secrets out of instance config files
 - in Windows one-shot mode, `schedule.cron` and `schedule.run_on_start` are informational only; Task Scheduler is the actual schedule source
 
+Optional publisher-session settings:
+
+- `sources.<name>.browser_storage_state`: path to a Playwright storage-state JSON file captured from a user-authorized browser session
+- this is most relevant for challenged publisher pages such as ACS, where discovery may come from Crossref metadata but OA full-text resolution can benefit from a real browser session
+- if the path is empty or missing, runtime ignores it and continues with the normal fallback chain
+
 ### 2. Regenerate the Compose file
 
 Regenerate the Compose file from all instance configs:

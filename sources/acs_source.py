@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 import feedparser
 from bs4 import BeautifulSoup
 
+from access.oa_resolver import resolve_openalex_abstract
 from models import Paper
 from .base import PublisherSource, build_paper, matches_topics
 
@@ -17,22 +20,28 @@ ACS_FEEDS = {
     "jmcmar": {
         "name": "Journal of Medicinal Chemistry",
         "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jmcmar",
+        "crossref_issn": "0022-2623",
     },
     "jacsat": {
         "name": "JACS",
         "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jacsat",
+        "crossref_issn": "0002-7863",
     },
     "acbcct": {
         "name": "ACS Chemical Biology",
         "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=acbcct",
+        "crossref_issn": "1554-8929",
     },
     "jctcce": {
         "name": "Journal of Chemical Theory and Computation",
         "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=jctcce",
+        "crossref_issn": "1549-9618",
     },
 }
 
 SCRAPE_BUDGET_SECONDS = 45
+CROSSREF_WORKS_API = "https://api.crossref.org/journals/{issn}/works"
+CROSSREF_ROWS = 50
 
 
 class ACSSource(PublisherSource):
@@ -64,6 +73,14 @@ class ACSSource(PublisherSource):
                     cutoff,
                     deadline_monotonic,
                 )
+                if not batch:
+                    logger.info("ACS (%s): feed returned no usable papers; trying Crossref discovery fallback", info["name"])
+                    batch = self._fetch_crossref_batch(
+                        info,
+                        topics,
+                        cutoff,
+                        deadline_monotonic,
+                    )
                 papers.extend(batch)
                 logger.info("ACS (%s): found %s papers", info["name"], len(batch))
             except Exception as e:
@@ -135,6 +152,75 @@ class ACSSource(PublisherSource):
                     url=link,
                     source=f"ACS - {journal_name}",
                     doi=doi,
+                    discovery_method="rss",
+                )
+            )
+
+        return papers
+
+    def _fetch_crossref_batch(
+        self,
+        info: dict,
+        topics: list[str],
+        cutoff: datetime,
+        deadline_monotonic: float,
+    ) -> list[Paper]:
+        issn = str(info.get("crossref_issn", "")).strip()
+        if not issn:
+            logger.warning("ACS (%s): no Crossref ISSN configured; skipping Crossref fallback", info["name"])
+            return []
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        params = {
+            "filter": f"from-pub-date:{cutoff.date().isoformat()},until-pub-date:{today},type:journal-article",
+            "rows": CROSSREF_ROWS,
+        }
+        url = f"{CROSSREF_WORKS_API.format(issn=issn)}?{urlencode(params)}"
+        response = self._fetch_phase(
+            url,
+            phase="discovery",
+            headers={"Accept": "application/json"},
+            allow_browser=False,
+            expect_html=False,
+            deadline_monotonic=deadline_monotonic,
+            context=f"ACS Crossref discovery ({info['name']})",
+        )
+        if not response:
+            return []
+
+        try:
+            payload = json.loads(response.text or "{}")
+        except json.JSONDecodeError as exc:
+            logger.warning("ACS (%s): invalid Crossref JSON: %s", info["name"], exc)
+            return []
+
+        papers = []
+        items = (payload.get("message") or {}).get("items") or []
+        for item in items:
+            published = _crossref_published_datetime(item)
+            if not published or published < cutoff:
+                continue
+
+            title = _clean_crossref_text(_first(item.get("title")))
+            doi = str(item.get("DOI", "")).strip()
+            abstract = _clean_crossref_abstract(item.get("abstract"))
+            if not abstract and doi:
+                abstract = resolve_openalex_abstract(doi, proxy_url=self._resolve_proxy_url())
+            link = str(item.get("URL", "")).strip()
+            text = f"{title} {abstract}"
+            if not matches_topics(text, topics):
+                continue
+
+            papers.append(
+                build_paper(
+                    title=title,
+                    authors=_crossref_authors(item),
+                    abstract=abstract,
+                    date=published.strftime("%Y-%m-%d"),
+                    url=link or (f"https://doi.org/{doi}" if doi else ""),
+                    source=f"ACS - {info['name']}",
+                    doi=doi,
+                    discovery_method="crossref",
                 )
             )
 
@@ -165,3 +251,50 @@ class ACSSource(PublisherSource):
         except Exception as e:
             logger.warning("ACS: failed to scrape abstract from %s: %s", url, e)
         return ""
+
+
+def _first(value) -> str:
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value or "")
+
+
+def _clean_crossref_text(value: str) -> str:
+    if not value:
+        return ""
+    return " ".join(BeautifulSoup(value, "html.parser").get_text(" ", strip=True).split())
+
+
+def _clean_crossref_abstract(value) -> str:
+    return _clean_crossref_text(_first(value))
+
+
+def _crossref_authors(item: dict) -> list[str]:
+    authors = []
+    for author in item.get("author") or []:
+        if not isinstance(author, dict):
+            continue
+        given = str(author.get("given", "")).strip()
+        family = str(author.get("family", "")).strip()
+        name = " ".join(part for part in (given, family) if part)
+        if name:
+            authors.append(name)
+    return authors
+
+
+def _crossref_published_datetime(item: dict) -> datetime | None:
+    for field in ("published-print", "published-online", "published"):
+        raw = item.get(field) or {}
+        date_parts = raw.get("date-parts") or []
+        if not date_parts:
+            continue
+        parts = list(date_parts[0])
+        if not parts:
+            continue
+        while len(parts) < 3:
+            parts.append(1)
+        try:
+            return datetime(parts[0], parts[1], parts[2], tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None

@@ -22,7 +22,18 @@
       <tr><td class="label">时间范围</td><td>过去 {{ time_range_hours }} 小时</td></tr>
       <tr><td class="label">本报告文章来</td><td>{{ sources_used | join("、") if sources_used else "N/A" }}</td></tr>
       <tr><td class="label">入选论文数（入选/抓取）</td><td>{{ run_stats.report_count_display or ((papers | length) ~ "/0") }}</td></tr>
+      <tr><td class="label">访问路径分布</td><td>{{ access_breakdown_display }}</td></tr>
     </table>
+    {% if source_warning_items %}
+    <div class="warnings">
+      <p><strong>抓取告警：</strong></p>
+      <ul>
+        {% for item in source_warning_items %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
   </section>
 
   {% if papers %}
@@ -43,6 +54,11 @@
         {% endif %}
         {% if paper.relevance and paper.relevance.warning_messages %}
         <p><strong>告警：</strong>{{ paper.relevance.warning_messages | join(" | ") }}</p>
+        {% endif %}
+        <p><strong>发现方式：</strong>{{ discovery_label(paper) }}</p>
+        <p><strong>访问路径：</strong>{{ access_label(paper) }}</p>
+        {% if paper.access_note %}
+        <p><strong>访问说明：</strong>{{ paper.access_note }}</p>
         {% endif %}
         <p><strong>访问入口：</strong><a href="{{ paper.entry_url }}">{{ paper.entry_url }}</a></p>
         {% if paper.download_url %}

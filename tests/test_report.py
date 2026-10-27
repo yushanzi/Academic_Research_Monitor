@@ -14,13 +14,20 @@ class _FakeTemplate:
     def render(self, **kwargs):
         paper_titles = " | ".join(paper.title for paper in kwargs["papers"])
         summary_labels = " | ".join(kwargs["summary_label"](paper) for paper in kwargs["papers"])
+        discovery_labels = " | ".join(kwargs["discovery_label"](paper) for paper in kwargs["papers"])
+        access_labels = " | ".join(kwargs["access_label"](paper) for paper in kwargs["papers"])
+        warnings = " | ".join(kwargs["source_warning_items"])
         return (
             f"{paper_titles}\n"
             f"{kwargs['trend_summary']['trends']}\n"
             f"{' '.join(kwargs['topics'])}\n"
             f"{kwargs['schedule_display']}\n"
             f"{kwargs['run_stats']['report_count_display']}\n"
-            f"{summary_labels}"
+            f"{kwargs['access_breakdown_display']}\n"
+            f"{summary_labels}\n"
+            f"{discovery_labels}\n"
+            f"{access_labels}\n"
+            f"{warnings}"
         )
 
 
@@ -100,7 +107,15 @@ class ReportTests(unittest.TestCase):
                     config,
                     "2026-03-30",
                     tmp,
-                    {"report_count_display": "1/3"},
+                    {
+                        "report_count_display": "1/3",
+                        "access_path_breakdown": {"publisher/full_text": 1},
+                        "source_diagnostics": {
+                            "ACS Publications": {
+                                "discovery": {"blocked": 2, "rate_limited": 0, "failures": 0, "last_status": "ok"}
+                            }
+                        },
+                    },
                 )
 
             html_path = os.path.join(tmp, "academic_report_2026-03-30.html")
@@ -113,6 +128,8 @@ class ReportTests(unittest.TestCase):
             self.assertIn("protein folding", html)
             self.assertIn("每天 8:00 AM（UTC）", html)
             self.assertIn("1/3", html)
+            self.assertIn("publisher/full_text: 1", html)
+            self.assertIn("ACS Publications - discovery: blocked 2", html)
 
     def test_report_template_omits_redundant_metadata_labels(self):
         template_path = os.path.join(
@@ -139,6 +156,11 @@ class ReportTests(unittest.TestCase):
 
         self.assertNotIn(">核心关注点<", template)
         self.assertIn("<strong>纳入原因：</strong>", template)
+        self.assertIn("<strong>发现方式：</strong>", template)
+        self.assertIn("<strong>访问路径：</strong>", template)
+        self.assertIn("<strong>访问说明：</strong>", template)
+        self.assertIn("<strong>抓取告警：</strong>", template)
+        self.assertIn("访问路径分布", template)
         self.assertIn("<strong>访问入口：</strong>", template)
         self.assertIn("<strong>下载地址：</strong>", template)
         self.assertIn("{{ schedule_display }}", template)
@@ -151,9 +173,12 @@ class ReportTests(unittest.TestCase):
             date="2026-03-30",
             url="https://example.com/p1",
             source="bioRxiv",
+            discovery_method="api",
         )
         paper.full_text_available = True
         paper.evidence_level = "full_text"
+        paper.access_route = "publisher"
+        paper.access_note = "已访问到出版方 PDF，并成功提取全文。"
         paper.relevance = AbstractRelevanceResult(
             is_relevant=True,
             relevance_score=0.91,
@@ -187,7 +212,10 @@ class ReportTests(unittest.TestCase):
                     config,
                     "2026-03-30",
                     tmp,
-                    {"report_count_display": "1/1"},
+                    {
+                        "report_count_display": "1/1",
+                        "access_path_breakdown": {"publisher/full_text": 1},
+                    },
                 )
 
             html_path = os.path.join(tmp, "academic_report_2026-03-30.html")
@@ -195,6 +223,8 @@ class ReportTests(unittest.TestCase):
                 html = f.read()
             self.assertIn("全文总结", html)
             self.assertNotIn("摘要总结", html)
+            self.assertIn("API", html)
+            self.assertIn("publisher/full_text", html)
 
     def test_generate_report_keeps_summary_label_as_abstract_when_full_text_not_available(self):
         paper = build_paper(
@@ -204,9 +234,12 @@ class ReportTests(unittest.TestCase):
             date="2026-03-30",
             url="https://example.com/p1",
             source="bioRxiv",
+            discovery_method="crossref",
         )
         paper.full_text_available = False
         paper.evidence_level = "abstract_only"
+        paper.access_route = "repository"
+        paper.access_note = "已解析到外部开放获取副本，但当前仍按摘要级证据处理。"
         paper.relevance = AbstractRelevanceResult(
             is_relevant=True,
             relevance_score=0.91,
@@ -240,13 +273,18 @@ class ReportTests(unittest.TestCase):
                     config,
                     "2026-03-30",
                     tmp,
-                    {"report_count_display": "1/1"},
+                    {
+                        "report_count_display": "1/1",
+                        "access_path_breakdown": {"repository/abstract_only": 1},
+                    },
                 )
 
             html_path = os.path.join(tmp, "academic_report_2026-03-30.html")
             with open(html_path, "r", encoding="utf-8") as f:
                 html = f.read()
             self.assertIn("摘要总结", html)
+            self.assertIn("Crossref", html)
+            self.assertIn("repository/abstract_only", html)
 
     def test_summary_label_uses_full_text_only_when_actual_full_text_was_extracted(self):
         paper = build_paper(
@@ -264,6 +302,22 @@ class ReportTests(unittest.TestCase):
         paper.full_text_available = False
         paper.evidence_level = "abstract_only"
         self.assertEqual(self.report._summary_label(paper), "摘要总结")
+
+    def test_report_helpers_format_discovery_and_access_labels(self):
+        paper = build_paper(
+            title="Paper",
+            authors=["Author A"],
+            abstract="Abstract text",
+            date="2026-03-30",
+            url="https://example.com/p1",
+            source="bioRxiv",
+            discovery_method="crossref",
+        )
+        paper.access_route = "repository"
+        paper.evidence_level = "full_text"
+
+        self.assertEqual(self.report._discovery_label(paper), "Crossref")
+        self.assertEqual(self.report._access_label(paper), "repository/full_text")
 
     def test_report_css_uses_finer_grained_pagination_controls(self):
         css_path = os.path.join(

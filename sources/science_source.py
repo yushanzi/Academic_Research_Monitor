@@ -99,6 +99,7 @@ class ScienceSource(PublisherSource):
                             url=link,
                             source="Science",
                             doi=doi,
+                            discovery_method="rss",
                         )
                     )
 

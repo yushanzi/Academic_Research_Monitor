@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import inspect
 import json
 import logging
@@ -11,6 +12,7 @@ import os
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 from analysis import analyze_papers, generate_trend_summary, resolve_content_analysis_provider
@@ -23,7 +25,7 @@ from models import Paper
 from retention import prune_output_artifacts
 from scoring.selector import select_abstract_relevance
 from sources import ALL_SOURCES, get_source_class
-from sources.base import deduplicate_papers
+from sources.base import deduplicate_papers, playwright_browser_status
 
 REPORT_IMPORT_ERROR: Exception | None = None
 MAILER_IMPORT_ERROR: Exception | None = None
@@ -168,7 +170,9 @@ def _run_pipeline(
 ) -> int:
     hours = config.time_range_hours
 
+    _normalize_source_file_paths(config, config_path)
     prune_output_artifacts(output_dir, retention_days=config.retention.days)
+    _warn_if_browser_fallback_unavailable(config, logger)
 
     logger.info("Starting academic research monitor for report date %s", date_str)
     logger.info("Time range: past %s hours", hours)
@@ -250,6 +254,7 @@ def _run_pipeline(
         abstract_scored_count=abstract_scored_count,
         selected_unique_count=len(abstract_selected_papers),
         source_diagnostics=source_diagnostics,
+        papers=[],
     )
 
     if not abstract_selected_papers:
@@ -297,6 +302,7 @@ def _run_pipeline(
         abstract_scored_count=abstract_scored_count,
         selected_unique_count=len(analyzed_papers),
         source_diagnostics=source_diagnostics,
+        papers=analyzed_papers,
     )
     _write_run_stats(run_stats, output_dir)
 
@@ -323,6 +329,23 @@ def _has_abstract_content(paper: Paper) -> bool:
     return bool((paper.abstract or "").strip())
 
 
+def _warn_if_browser_fallback_unavailable(config: AppConfig, logger) -> None:
+    nature_cfg = (config.sources or {}).get("nature", {}) or {}
+    if not nature_cfg.get("enabled", False):
+        return
+    source_fetch_mode = str(nature_cfg.get("fetch_mode", "")).strip()
+    effective_fetch_mode = source_fetch_mode or config.scraping.default_fetch_mode
+    if effective_fetch_mode == "http_client":
+        return
+    available, detail = playwright_browser_status()
+    if available:
+        return
+    logger.warning(
+        "Nature browser fallback is unavailable; article pages may remain blocked. Install Playwright Chromium. Detail: %s",
+        detail,
+    )
+
+
 def _build_run_stats(
     *,
     date_str: str,
@@ -333,6 +356,7 @@ def _build_run_stats(
     abstract_scored_count: int,
     selected_unique_count: int,
     source_diagnostics: dict[str, dict] | None = None,
+    papers: list[Paper] | None = None,
 ) -> dict:
     stats = {
         "date": date_str,
@@ -343,10 +367,58 @@ def _build_run_stats(
         "abstract_scored_count": abstract_scored_count,
         "selected_unique_count": selected_unique_count,
         "report_count_display": f"{selected_unique_count}/{raw_fetched_count}",
+        "paper_access_summary": _paper_access_summary(papers or []),
+        "access_path_breakdown": _paper_access_breakdown(papers or []),
     }
     if source_diagnostics:
         stats["source_diagnostics"] = source_diagnostics
     return stats
+
+
+def _paper_access_summary(papers: list[Paper]) -> list[dict]:
+    return [
+        {
+            "title": paper.title,
+            "source": paper.source,
+            "discovery_method": paper.discovery_method or "unknown",
+            "access_route": paper.access_route or "none",
+            "access_path": _paper_access_path(paper),
+            "evidence_level": paper.evidence_level or "abstract_only",
+            "open_access": bool(paper.open_access),
+            "entry_url": paper.entry_url,
+            "download_url": paper.download_url,
+            "access_note": paper.access_note or "",
+        }
+        for paper in papers
+    ]
+
+
+def _paper_access_path(paper: Paper) -> str:
+    route = (paper.access_route or "none").strip().lower()
+    evidence = (paper.evidence_level or "abstract_only").strip() or "abstract_only"
+    if route and route != "none":
+        return f"{route}/{evidence}"
+    return evidence
+
+
+def _paper_access_breakdown(papers: list[Paper]) -> dict[str, int]:
+    counts = Counter(_paper_access_path(paper) for paper in papers)
+    return dict(sorted(counts.items()))
+
+
+def _normalize_source_file_paths(config: AppConfig, config_path: str) -> None:
+    config_dir = Path(config_path).resolve().parent
+    for source_cfg in (config.sources or {}).values():
+        if not isinstance(source_cfg, dict):
+            continue
+        browser_storage_state = str(source_cfg.get("browser_storage_state", "") or "").strip()
+        if not browser_storage_state:
+            continue
+        path = Path(browser_storage_state)
+        if path.is_absolute():
+            source_cfg["browser_storage_state"] = str(path)
+            continue
+        source_cfg["browser_storage_state"] = str((config_dir / path).resolve())
 
 
 def _collect_source_diagnostics(source_instances: list) -> dict[str, dict]:

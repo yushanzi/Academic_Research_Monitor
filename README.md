@@ -58,7 +58,15 @@ Create one config per monitor under `instances/`, or copy `config.template.json`
 - `scraping.default_min_request_interval_seconds`: default per-source minimum interval between publisher requests
 - `scraping.default_jitter_seconds`: optional random delay added on top of the minimum interval
 - `network.proxies`: named proxy profiles that sources can reference with `sources.<name>.proxy_profile`
+- `sources.<name>.browser_storage_state`: optional path to a Playwright `storage_state` JSON file; useful when a challenged publisher page must be opened with a user-authorized browser session (especially for ACS)
 - `access.mode`: must be `open_access` in the current implementation (`authenticated` not implemented yet)
+
+For challenged publisher sources such as ACS, a practical pattern is:
+
+- use `Crossref`/metadata fallback for discovery
+- keep full-text resolution limited to OA candidates
+- optionally set `sources.acs.browser_storage_state` to a Playwright storage-state JSON captured from a real browser session
+- leave the field empty when you do not have a session file; runtime ignores empty or missing paths
 
 Runtime interest semantics live only in the sibling `instances/<instance>/interest_profile.json` file:
 
