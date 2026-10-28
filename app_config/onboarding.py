@@ -36,7 +36,7 @@ User document:
 
 ONBOARDING_LLM_CONFIG = {
     "provider": "openai_compatible",
-    "model": "gemini-3-flash",
+    "model": "claude-opus-4.8",
     "base_url": "https://api.poe.com/v1",
 }
 

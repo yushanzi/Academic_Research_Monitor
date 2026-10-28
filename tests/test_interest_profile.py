@@ -25,7 +25,7 @@ class InterestProfileTests(unittest.TestCase):
             {
                 "user": {"name": "monitor_a"},
                 "sources": {"arxiv": {"enabled": True}},
-                "llm": {"provider": "openai_compatible", "model": "gemini-3-flash", "base_url": "https://api.poe.com/v1"},
+                "llm": {"provider": "openai_compatible", "model": "claude-opus-4.8", "base_url": "https://api.poe.com/v1"},
                 "email": {"recipient": "user@example.com"},
                 "output_dir": tmp,
             },
@@ -98,12 +98,13 @@ class InterestProfileTests(unittest.TestCase):
         self.assertEqual(profile.must_have, ["confirmed must have"])
         self.assertEqual(profile.exclude, ["confirmed exclude"])
 
-    def test_profile_payload_contains_versions_and_profile(self):
+    def test_profile_payload_contains_expected_fields(self):
         payload = build_interest_profile_payload(InterestProfile(core_topics=["protein folding"], summary="Track protein folding."))
         self.assertTrue(payload["confirmed"])
-        self.assertIn("versions", payload)
+        self.assertEqual(payload["source"], "generated_from_document")
+        self.assertIn("fingerprint", payload)
         self.assertEqual(payload["profile"]["core_topics"], ["protein folding"])
-        self.assertEqual(payload["versions"]["prompt_version"], "interest-profile-v4")
+        self.assertNotIn("versions", payload)
 
     def test_build_simple_interest_profile_uses_english_summary(self):
         profile = build_simple_interest_profile(

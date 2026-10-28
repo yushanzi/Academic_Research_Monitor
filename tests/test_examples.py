@@ -16,7 +16,7 @@ class ExampleConfigTests(unittest.TestCase):
         with open("config.template.json", "r", encoding="utf-8") as f:
             template = json.load(f)
         self.assertEqual(template["llm"]["provider"], "openai_compatible")
-        self.assertEqual(template["llm"]["model"], "gemini-3-flash")
+        self.assertEqual(template["llm"]["model"], "claude-opus-4.8")
         self.assertEqual(template["llm"]["base_url"], "https://api.poe.com/v1")
         self.assertEqual(template["email"]["from"], "Academic Monitor <noreply@innoscreen.ai>")
         self.assertEqual(template["retention"]["days"], 30)
@@ -24,7 +24,7 @@ class ExampleConfigTests(unittest.TestCase):
         self.assertEqual(template["abstract_selection"]["method"], "candidate_score")
         self.assertEqual(
             [judge["model"] for judge in template["abstract_selection"]["three_llm_voting"]["judges"]],
-            ["gemini-3-flash", "gpt-4o", "claude-haiku-4.5"],
+            ["claude-opus-4.8", "gpt-4o", "claude-haiku-4.5"],
         )
         self.assertNotIn("topics", template)
         self.assertNotIn("interest_description", template)

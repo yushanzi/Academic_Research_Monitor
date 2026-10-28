@@ -146,8 +146,8 @@ Supported input formats:
 The script will:
 
 - read the user's document
-- use Poe `gemini-3-flash` to extract `interest_description`, `topics`, `must_have`, and `exclude`
-- use Poe `gemini-3-flash` to generate a confirmed `instances/<instance>/interest_profile.json`
+- use Poe `claude-opus-4.8` to extract `interest_description`, `topics`, `must_have`, and `exclude`
+- use Poe `claude-opus-4.8` to generate a confirmed `instances/<instance>/interest_profile.json`
 - fall back to heuristic parsing if the LLM is unavailable
 - generate a runtime config based on `config.template.json`
 

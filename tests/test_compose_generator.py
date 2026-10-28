@@ -19,7 +19,7 @@ class ComposeGeneratorTests(unittest.TestCase):
         payload = {
             "user": {"name": user_name or dir_name},
             "sources": {"arxiv": {"enabled": True}},
-            "llm": {"provider": "openai_compatible", "model": "gemini-3-flash", "base_url": "https://api.poe.com/v1"},
+            "llm": {"provider": "openai_compatible", "model": "claude-opus-4.8", "base_url": "https://api.poe.com/v1"},
             "email": {"recipient": "user@example.com"},
             "output_dir": f"output/{dir_name}",
         }

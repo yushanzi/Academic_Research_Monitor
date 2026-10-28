@@ -44,7 +44,7 @@
   "time_range_hours": 24,
   "llm": {
     "provider": "openai_compatible",
-    "model": "gemini-3-flash",
+    "model": "grok-4.7",
     "base_url": "https://api.poe.com/v1"
   },
   "email": {
@@ -79,19 +79,19 @@
         {
           "name": "judge_1",
           "provider": "openai_compatible",
-          "model": "gemini-3-flash",
+          "model": "grok-4.7",
           "base_url": "https://api.poe.com/v1"
         },
         {
           "name": "judge_2",
           "provider": "openai_compatible",
-          "model": "gpt-4o",
+          "model": "gpt-5.4",
           "base_url": "https://api.poe.com/v1"
         },
         {
           "name": "judge_3",
           "provider": "openai_compatible",
-          "model": "claude-haiku-4.5",
+          "model": "claude-opus-4.8",
           "base_url": "https://api.poe.com/v1"
         }
       ]
